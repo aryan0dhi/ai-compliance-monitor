@@ -68,6 +68,7 @@ app/
   modules/              one package per requirement area (below)
 alembic/                migrations
 tests/
+docs/database.md        schema, relationships, conventions
 docs/spec-decisions.md  spec conflicts and interim decisions
 ```
 
@@ -101,6 +102,12 @@ no-ops:
 
 Owners replace the body of their interface function and keep the signature. If a signature has
 to change, coordinate with the people calling it.
+
+## Database schema
+
+Tables, relationships, conventions and how to extend them: [docs/database.md](docs/database.md).
+Migration `0002` adds `monitored_system`, `metric_sample`, `threshold_version` and `event`
+(REQ-01, REQ-03, storage part of REQ-05).
 
 ## Database migrations
 

@@ -11,6 +11,7 @@ final, because cross-team tests depend on them.
 | D-02 | `metric_type` column and `metric_name` naming | Decided (team) |
 | D-03 | Event type/state names: Section 5 vs Models 1–2 | Interim, **pod** |
 | D-04 | Duplicate metric submissions | Open, **pod**; temporary behavior |
+| D-05 | Evidence bundle window (±1 h) vs flag-time hashing | Open, **pod** |
 
 ## D-01: Threshold direction (REQ-03, AC-03)
 
@@ -77,6 +78,27 @@ error, or whether a duplicate can create a second flagged event.
 
 **Question for the pod.** Should an identical repeat return `200` or `201`? Should a conflicting
 repeat return `409` (not currently in the contract)?
+
+## D-05: Evidence bundle window (REQ-05, Model 2)
+
+**Conflict.** Model 2 defines `event.evidence_bundle_hash` as the sha256 of an evidence bundle of
+"±1 h of samples" around the breach. The hour *after* detection doesn't exist yet when the event is
+flagged, so the hash can't be computed at flag time. Model 1 also says the evidence bundle is
+created when the event enters FLAGGED.
+
+**Options.**
+- (a) Bundle = samples in `[t − 1 h, t]`, hashed at flag time. Simple and atomic with the flag, but
+  loses post-breach context.
+- (b) Keep ±1 h and compute the hash once `t + 1 h` has passed. Background worker job; the event
+  carries a null hash for the first hour.
+- (c) Hash `[t − 1 h, t]` at flag time and add a second hash for the full window later.
+
+**Interim decision.** `event.evidence_bundle_hash` is **nullable** and **not computed** in Phase 3.
+A CHECK constraint ensures that any value written is a 64-character lowercase hex sha256.
+
+**To agree with the pod.** Which window, when the hash is computed, and which module owns it.
+Phase 5 retention also depends on this, because the samples in an event's window must be kept
+until that event's `retain_until`.
 
 ## Other notes
 
