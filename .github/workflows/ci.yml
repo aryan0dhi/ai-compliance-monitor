@@ -1,0 +1,364 @@
+name: CI
+
+# Runs on pushes to any branch, PRs into any base, and manual dispatch.
+# Jobs skip with a notice until their inputs are tracked in git, then enforce.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python - lint, test & audit
+    runs-on: ubuntu-latest
+    # Cancels this job's previous run on the same PR or branch, except on main.
+    concurrency:
+      group: ${{ github.workflow }}-python-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+    env:
+      COVERAGE_MIN: 80
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/app_test
+    # Throwaway database for tests and the Alembic check. It starts even when the job skips.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: app_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      # Looks at tracked files only. Python code without a lockfile fails.
+      - name: Detect Python project
+        id: detect
+        run: |
+          set -eu
+          has_py=false; has_lock=false; has_tests=false; has_alembic=false
+          [ -z "$(git ls-files '*.py')" ] || has_py=true
+          [ -z "$(git ls-files requirements-dev.txt)" ] || has_lock=true
+          [ -z "$(git ls-files 'test_*.py' '*/test_*.py' '*_test.py')" ] || has_tests=true
+          [ -z "$(git ls-files alembic.ini)" ] || has_alembic=true
+          if [ "$has_lock" = true ]; then
+            run=true
+          elif [ "$has_py" = true ]; then
+            echo "::error::Python files are tracked but requirements-dev.txt is missing (hashed pip-compile lockfile expected)."
+            exit 1
+          else
+            echo "::notice::No Python project yet (no tracked .py files or requirements-dev.txt); skipping."
+            run=false
+          fi
+          {
+            echo "run=$run"
+            echo "has_py=$has_py"
+            echo "has_tests=$has_tests"
+            echo "has_alembic=$has_alembic"
+          } >> "$GITHUB_OUTPUT"
+
+      # The pip cache errors without a matching dependency file, so this stays behind the gate.
+      - name: Set up Python
+        if: steps.detect.outputs.run == 'true'
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements*.txt
+
+      - name: Install dependencies
+        if: steps.detect.outputs.run == 'true'
+        run: pip install --require-hashes -r requirements-dev.txt
+
+      - name: Ruff lint
+        if: steps.detect.outputs.run == 'true'
+        run: ruff check .
+
+      - name: Ruff format check
+        if: steps.detect.outputs.run == 'true'
+        run: ruff format --check .
+
+      # mypy errors when there are no .py files, unlike ruff.
+      - name: Type check
+        if: steps.detect.outputs.run == 'true' && steps.detect.outputs.has_py == 'true'
+        run: mypy .
+
+      # Exit code 5 (no tests collected) fails: this only runs when test files exist.
+      - name: Run tests with coverage
+        if: steps.detect.outputs.run == 'true' && steps.detect.outputs.has_tests == 'true'
+        run: pytest --cov --cov-report=xml --cov-report=term --cov-fail-under="$COVERAGE_MIN"
+
+      - name: No tests yet
+        if: steps.detect.outputs.run == 'true' && steps.detect.outputs.has_tests != 'true'
+        run: echo "::notice::No tracked test files (test_*.py or *_test.py); skipping pytest."
+
+      - name: Upload coverage
+        if: steps.detect.outputs.run == 'true' && steps.detect.outputs.has_tests == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: python-coverage
+          path: coverage.xml
+          if-no-files-found: error
+
+      # Fails if the models and the migrations disagree.
+      - name: Check Alembic migrations
+        if: steps.detect.outputs.run == 'true' && steps.detect.outputs.has_alembic == 'true'
+        run: |
+          alembic upgrade head
+          alembic check
+
+      - name: No Alembic config yet
+        if: steps.detect.outputs.run == 'true' && steps.detect.outputs.has_alembic != 'true'
+        run: echo "::notice::No tracked alembic.ini; skipping migration check."
+
+      # Runtime dependencies only. Fails on any known vulnerability.
+      - name: Audit runtime dependencies
+        if: steps.detect.outputs.run == 'true'
+        run: |
+          set -eu
+          req=requirements.txt
+          [ -f "$req" ] || req=requirements-dev.txt
+          pip-audit -r "$req" --require-hashes --disable-pip --no-deps
+
+  security:
+    name: Security - gitleaks
+    runs-on: ubuntu-latest
+    # No concurrency group: runs are never cancelled.
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # Downloads the gitleaks CLI and verifies its SHA-256.
+      - name: Install gitleaks
+        run: |
+          v=8.30.1
+          curl -sSfL -o gitleaks.tar.gz "https://github.com/gitleaks/gitleaks/releases/download/v${v}/gitleaks_${v}_linux_x64.tar.gz"
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+
+      - name: Scan
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -eu
+          case "$EVENT" in
+            pull_request)
+              range="$PR_BASE..$PR_HEAD" ;;
+            push)
+              if [ "$PUSH_BEFORE" != 0000000000000000000000000000000000000000 ] \
+                 && git cat-file -e "$PUSH_BEFORE^{commit}" 2>/dev/null; then
+                range="$PUSH_BEFORE..$SHA"
+              else
+                # New branch or force-push: scans commits not on any other remote branch.
+                range="$SHA --not --exclude=origin/$GITHUB_REF_NAME --remotes=origin"
+              fi ;;
+            *)
+              range="" ;;  # full history
+          esac
+          echo "Scanning: ${range:-full history}"
+          ./gitleaks git --redact --verbose --exit-code 1 \
+            --report-format sarif --report-path gitleaks.sarif \
+            ${range:+--log-opts="$range"} .
+
+      - name: Upload report
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gitleaks-report
+          path: gitleaks.sarif
+          if-no-files-found: ignore
+
+  osv:
+    name: Security - OSV-Scanner
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ github.workflow }}-osv-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      # OSV-Scanner exits non-zero when it finds no packages, so an empty repo is skipped here.
+      - name: Find lockfiles
+        id: detect
+        run: |
+          set -eu
+          git ls-files 'requirements*.txt' '**/requirements*.txt' uv.lock poetry.lock Pipfile.lock > "$RUNNER_TEMP/osv-files"
+          if [ -s "$RUNNER_TEMP/osv-files" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::No tracked Python lockfiles yet; skipping OSV-Scanner."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Downloads the OSV-Scanner CLI and verifies its SHA-256.
+      - name: Install OSV-Scanner
+        if: steps.detect.outputs.run == 'true'
+        run: |
+          v=2.6.0
+          curl -sSfL -o osv-scanner "https://github.com/google/osv-scanner/releases/download/v${v}/osv-scanner_linux_amd64"
+          echo "ca69b3d3cd08f889a49dc0a383122f71cc528b83803671df5fd874d97485b108  osv-scanner" | sha256sum -c -
+          chmod +x osv-scanner
+
+      # Fails on any known vulnerability, dev dependencies included.
+      - name: Scan lockfiles
+        if: steps.detect.outputs.run == 'true'
+        run: |
+          set -eu
+          args=()
+          while IFS= read -r f; do args+=(-L "$f"); done < "$RUNNER_TEMP/osv-files"
+          ./osv-scanner scan source "${args[@]}"
+
+  codeql:
+    name: Security - CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ github.workflow }}-codeql-${{ matrix.language }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, actions]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      # CodeQL fails when a requested language has no source, so python waits for a tracked .py file.
+      - name: Detect source
+        id: detect
+        env:
+          LANGUAGE: ${{ matrix.language }}
+        run: |
+          set -eu
+          if [ "$LANGUAGE" = python ] && [ -z "$(git ls-files '*.py')" ]; then
+            echo "::notice::No tracked Python files yet; skipping CodeQL for python."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Initialize CodeQL
+        if: steps.detect.outputs.run == 'true'
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+
+      # Uploads to the Security tab only on public repos (private ones need code scanning enabled).
+      # The SARIF is always kept locally and checked below.
+      - name: Analyze
+        if: steps.detect.outputs.run == 'true'
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}
+          output: ${{ runner.temp }}/codeql
+          upload: ${{ github.event.repository.private && 'never' || 'always' }}
+
+      - name: Upload SARIF
+        if: steps.detect.outputs.run == 'true' && !cancelled()
+        uses: actions/upload-artifact@v7
+        with:
+          name: codeql-${{ matrix.language }}-sarif
+          path: ${{ runner.temp }}/codeql
+          if-no-files-found: ignore
+
+      # Fails the job if CodeQL reported any finding.
+      - name: Check for findings
+        if: steps.detect.outputs.run == 'true'
+        env:
+          SARIF_DIR: ${{ runner.temp }}/codeql
+        run: |
+          jq -r '.runs[].results[] | "\(.ruleId)  \(.locations[0].physicalLocation.artifactLocation.uri):\(.locations[0].physicalLocation.region.startLine)  \(.message.text)"' "$SARIF_DIR"/*.sarif
+          n=$(jq -s '[.[].runs[].results[]] | length' "$SARIF_DIR"/*.sarif)
+          echo "CodeQL findings: $n"
+          [ "$n" -eq 0 ]
+
+  actionlint:
+    name: Lint - actionlint
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ github.workflow }}-actionlint-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      # Downloads actionlint and verifies its SHA-256.
+      - name: Install actionlint
+        run: |
+          v=1.7.12
+          curl -sSfL -o actionlint.tar.gz "https://github.com/rhysd/actionlint/releases/download/v${v}/actionlint_${v}_linux_amd64.tar.gz"
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  actionlint.tar.gz" | sha256sum -c -
+          tar -xzf actionlint.tar.gz actionlint
+
+      - name: Lint workflows
+        run: ./actionlint -color
+
+  container:
+    name: Container - build & Trivy scan
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ github.workflow }}-container-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Detect Dockerfile
+        id: detect
+        run: |
+          set -eu
+          if [ -n "$(git ls-files Dockerfile)" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::No tracked Dockerfile at the repo root yet; skipping container scan."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Downloads the Trivy CLI and verifies its SHA-256.
+      - name: Install Trivy
+        if: steps.detect.outputs.run == 'true'
+        run: |
+          v=0.74.0
+          curl -sSfL -o trivy.tar.gz "https://github.com/aquasecurity/trivy/releases/download/v${v}/trivy_${v}_Linux-64bit.tar.gz"
+          echo "2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a  trivy.tar.gz" | sha256sum -c -
+          tar -xzf trivy.tar.gz trivy
+
+      - name: Build image
+        if: steps.detect.outputs.run == 'true'
+        run: docker build -t app:ci .
+
+      - name: Scan Dockerfile
+        if: steps.detect.outputs.run == 'true'
+        run: ./trivy config --exit-code 1 --severity HIGH,CRITICAL Dockerfile
+
+      # Fixable HIGH/CRITICAL vulnerabilities fail the job.
+      - name: Scan image
+        if: steps.detect.outputs.run == 'true'
+        run: ./trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed app:ci
