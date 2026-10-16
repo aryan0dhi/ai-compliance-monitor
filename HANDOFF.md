@@ -16,7 +16,8 @@ what is still open. The Phase 2 submission is the source of truth; where it is a
 | REQ-03 threshold configuration | Service function only (`add_threshold_version`); no endpoint (D-07) |
 | `GET /v1/events`, `GET /v1/events/{id}` | Implemented, unit + contract tested |
 | REQ-05 storage (`retain_until`, constraint, RESTRICT FKs) | Implemented. **Retention enforcement/purge is Phase 5 and not implemented** |
-| Real-PostgreSQL integration tests | **Written but never run.** 52 tests skip until Docker works |
+| Real-PostgreSQL integration tests | **Written but never run.** 52 tests skip until Docker works (backlog §10.1) |
+| Pod decisions D-01, D-03 to D-10 | Interim behavior implemented; agreement pending (backlog §10.2) |
 | Auth, ledger, notifications | **Not implemented** (yours). Production defaults fail closed |
 
 What a caller sees today:
@@ -264,11 +265,47 @@ To run HawkScan later: start the stack (`docker compose up`), set `HAWK_API_KEY`
 
 ## 10. Backlog for this area
 
-- Run `docker compose up` and `docker compose exec api pytest` (52 integration tests: migrations
-  round trip, live autogenerate-drift check, every constraint, retention math vs PostgreSQL,
-  concurrent duplicate submissions, services and HTTP on real SQL).
-- Run `pytest -m fuzz` against the real database as well (point `get_uow` at PostgreSQL).
-- Phase 5 retention (REQ-05): purge after `retain_until`, protect the evidence-window samples
-  (D-05), and record that backups are kept for 7 days.
-- Replace the `TEMPORARY(D-04)` duplicate behavior once the pod decides.
-- Update the configuration API (D-07) and breach-episode behavior (D-09) if the pod changes them.
+### 10.1 Blocked on Docker / PostgreSQL (verification not yet done)
+
+Docker Desktop on the owner's machine needs an update. Until it works, the SQL repositories,
+migration 0002 and the database constraints have **only** been checked offline (DDL compiled
+and compared with the models), never executed.
+
+- [ ] `cp .env.example .env` (set `POSTGRES_PASSWORD`), then `docker compose up --build -d`.
+      Confirm the api container runs `alembic upgrade head` and `GET /healthz` returns `200`.
+- [ ] `docker compose exec api pytest`. All 52 integration tests must **pass**, not skip
+      (`REQUIRE_POSTGRES=1` is set in compose). They cover:
+      - migration upgrade → downgrade → upgrade round trip
+      - live autogenerate check: models and migrations have no drift
+      - every CHECK, UNIQUE and RESTRICT foreign key, including the six-month retention
+        boundary under UTC, New York and Kiritimati session time zones
+      - `retain_until_for()` matching PostgreSQL interval arithmetic at month ends and leap days
+      - 8 concurrent identical submissions → exactly 1 sample and 1 event
+      - ingestion, threshold configuration, event queries and HTTP on real SQL
+- [ ] Run `pytest -m fuzz` with `get_uow` pointed at PostgreSQL to catch driver and encoding
+      errors the in-memory fakes can't show.
+- [ ] Remove the "written but never run" notes from §1 and README once the above passes.
+
+### 10.2 Blocked on pod decisions ([docs/spec-decisions.md](docs/spec-decisions.md))
+
+Current behavior is implemented and tested; the "If changed" column is the follow-up work.
+
+| ID | Decision needed | Current behavior | If changed |
+|---|---|---|---|
+| D-06 | Pagination shape, ordering, who may read events, 400 for bad queries, input rules | `limit`/`offset` envelope, newest first, viewer/reviewer/admin only | Update `events/router.py`, `events/schemas.py`, `tests/test_api.py` |
+| D-09 | One event per breaching sample, or one per breach episode | One per sample | New episode logic in `metrics/service.py` + `events/repository.py`; AC-03/04/16 fixtures |
+| D-04 | Status codes for repeated samples | `TEMPORARY(D-04)`: `200` identical, `409` conflicting | Change `_resolve_duplicate` and the router mapping; search `TEMPORARY(D-04)` |
+| D-07 | Configuration API and the shared fixture format | `add_threshold_version()` service only; systems seeded as rows | Add admin endpoints and/or a shared fixture loader |
+| D-01 | Shared fixtures must give each threshold a direction | `above`/`below`, strict | Confirm only; no code change expected |
+| D-03 | Event state/type names (Section 5 vs Models 1–2) | Section 5 names | Migration altering `ck_event_state`/`ck_event_type` + enums (before Phase 4) |
+| D-08 | Whether listing events writes ledger entries | Only `GET /v1/events/{id}` logs a `VIEW` | Pass the ledger to `list_events` (with the ledger owner) |
+| D-05 | Evidence-bundle window and when to hash it | `evidence_bundle_hash` NULL, not computed | Compute the hash (flag time or worker); Phase 5 retention depends on it |
+| D-10 | Limits on future or very old timestamps | Any valid ISO-8601 accepted | Add a window check in `metrics/schemas.py` using the clock |
+
+### 10.3 Later phases for this area (not started)
+
+- [ ] Phase 5 retention (REQ-05): purge data after `retain_until`, keep each event's
+      evidence-window samples until then (D-05), and document the 7-day Lightsail backup
+      retention. Today only storage is implemented (column + minimum-six-months constraint +
+      RESTRICT FKs); nothing prevents or performs early deletion.
+- [ ] Unbounded growth: no request size limit or rate limit on `POST /v1/metrics` (see §9).

@@ -13,6 +13,9 @@ The Phase 2 specification is the source of truth for requirements (REQ-xx), acce
 [HANDOFF.md](HANDOFF.md).** It covers the interfaces to implement, reusable functions,
 compatibility rules, testing patterns, open decisions and unverified security checks.
 
+**Backlog:** PostgreSQL integration tests are written but not yet run (Docker pending), and
+several contract details await pod agreement. See [HANDOFF.md §10](HANDOFF.md#10-backlog-for-this-area).
+
 ## Stack
 
 Python 3.12, FastAPI, PostgreSQL 16, SQLAlchemy 2, Alembic, Docker Compose. Hosted on AWS Lightsail.
