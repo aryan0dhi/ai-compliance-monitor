@@ -17,7 +17,8 @@ def get_engine() -> Engine:
         pool_pre_ping=True,
         pool_size=settings.db_pool_size,
         max_overflow=settings.db_max_overflow,
-        connect_args={"connect_timeout": 5},
+        # Session time zone pinned to UTC so timestamptz values come back as UTC datetimes.
+        connect_args={"connect_timeout": 5, "options": "-c timezone=UTC"},
     )
 
 

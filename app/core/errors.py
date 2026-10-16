@@ -1,6 +1,7 @@
-"""Shared error types."""
+"""Shared error types and handlers."""
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 
@@ -25,3 +26,12 @@ def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(UnimplementedError)
     async def _unimplemented(_: Request, exc: UnimplementedError) -> JSONResponse:
         return JSONResponse(status_code=501, content={"detail": str(exc)})
+
+    # Phase 2 Section 5: malformed or invalid input is 400 Bad Request (FastAPI defaults to 422).
+    @app.exception_handler(RequestValidationError)
+    async def _invalid_request(_: Request, exc: RequestValidationError) -> JSONResponse:
+        errors = [
+            {"loc": list(err.get("loc", ())), "msg": err.get("msg", ""), "type": err.get("type")}
+            for err in exc.errors()
+        ]
+        return JSONResponse(status_code=400, content={"detail": errors})

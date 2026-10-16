@@ -93,15 +93,53 @@ Under Q7.2 Decision 1, a state change, its ledger entry and its outbox row commi
 transaction**. These interfaces define how modules call each other. They are deliberately **not**
 no-ops:
 
-| Interface | Behavior until implemented |
+| Interface (FastAPI dependency) | Behavior until implemented |
 |---|---|
-| `modules/auth/interface.py` `get_principal()` | **Fails closed**: every protected request gets `401`. |
-| `modules/ledger/interface.py` `append(session, ...)` | Raises `UnimplementedError` (shown to API callers as `501`) and aborts the transaction. |
-| `modules/notifications/interface.py` `enqueue(session, ...)` | Raises `UnimplementedError` and aborts the transaction. |
-| `core/clock.py` `get_clock().now()` | Real UTC. The testing module will swap in the simulated clock. |
+| `modules/auth/interface.py` `get_principal()` → `Principal` | **Fails closed**: every protected request gets `401`. |
+| `modules/ledger/interface.py` `get_ledger()` → `LedgerWriter.append(session, ...)` | `UnimplementedLedger` raises `UnimplementedError` (shown to API callers as `501`) and aborts the transaction. |
+| `modules/notifications/interface.py` `get_notifier()` → `Notifier.enqueue(session, ...)` | `UnimplementedNotifier` raises `UnimplementedError` and aborts the transaction. |
+| `core/clock.py` `get_clock()` → `Clock.now()` | Real UTC. The testing module will swap in the simulated clock. |
+| `db/uow.py` `get_uow()` → `UnitOfWork` | Implemented: one transaction plus the module repositories. |
 
-Owners replace the body of their interface function and keep the signature. If a signature has
-to change, coordinate with the people calling it.
+Owners replace the `Unimplemented*` class (or the body of `get_principal`) and keep the Protocol
+signature. If a signature has to change, coordinate with the people calling it.
+`tests/test_interfaces.py` asserts that the production defaults stay fail-closed until then.
+
+### Code layout inside a module
+
+```
+router.py      HTTP only: parse/validate, call the service, map errors to status codes
+schemas.py     request/response bodies (Section 5.2)
+service.py     business logic; framework-independent, takes a UnitOfWork + collaborators
+repository.py  SQL behind a Protocol (Sql*Repository is the production implementation)
+models.py      SQLAlchemy tables
+```
+
+Services receive every collaborator (unit of work, ledger, notifier, clock) as an argument. That
+makes them reusable from other entry points (e.g. an Evidently adapter or the worker) and
+testable with the explicit doubles in `tests/fakes.py`. mypy checks that those doubles match the
+production Protocols.
+
+## Implemented endpoints
+
+| Endpoint | Requirements | Notes |
+|---|---|---|
+| `POST /v1/metrics` | REQ-01, REQ-03 | Stores the sample; on a strict threshold breach (above/below) creates a `FLAGGED` event and returns `flagged_event_id`. Duplicate handling is temporary (D-04). |
+| `GET /v1/events` | REQ-03 | Filters `system_id`, `state`, `type`, `since`; `limit`/`offset` pagination (D-06). |
+| `GET /v1/events/{event_id}` | REQ-03, REQ-15, REQ-05 storage | Full event; records a `VIEW` ledger entry (REQ-14). |
+| `GET /healthz` | Q7.3 | Database connectivity. |
+
+Until auth exists, every `/v1` call returns `401`. Once auth exists, a breach and an event view
+return `501` until the ledger and notifications modules are implemented. Open contract details
+are listed in [docs/spec-decisions.md](docs/spec-decisions.md) (D-04, D-06).
+
+## Checks
+
+```bash
+pytest -m "not integration"     # unit + HTTP contract tests (no database)
+ruff check . && ruff format --check .
+mypy                            # app/ and the test doubles' Protocol conformance
+```
 
 ## Database schema
 

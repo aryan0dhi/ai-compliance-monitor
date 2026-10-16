@@ -9,8 +9,8 @@ from fastapi.testclient import TestClient
 from app.core.errors import UnimplementedError
 from app.main import create_app
 from app.modules.auth.interface import Principal, get_principal
-from app.modules.ledger import interface as ledger
-from app.modules.notifications import interface as notifications
+from app.modules.ledger.interface import UnimplementedLedger, get_ledger
+from app.modules.notifications.interface import UnimplementedNotifier, get_notifier
 
 
 def test_auth_fails_closed():
@@ -33,12 +33,12 @@ def test_protected_route_is_denied_until_auth_exists():
 
 def test_ledger_append_is_unimplemented():
     with pytest.raises(UnimplementedError):
-        ledger.append(None, entry_type="FLAGGED", actor_id=None, payload={})
+        get_ledger().append(None, entry_type="FLAGGED", actor_id=None, payload={})
 
 
 def test_notifications_enqueue_is_unimplemented():
     with pytest.raises(UnimplementedError):
-        notifications.enqueue(
+        get_notifier().enqueue(
             None, notification_type="flag_notification", event_id=uuid4(), payload={}
         )
 
@@ -48,8 +48,14 @@ def test_unimplemented_error_maps_to_501():
 
     @app.get("/v1/_probe")
     def probe():
-        ledger.append(None, entry_type="VIEW", actor_id=None, payload={})
+        get_ledger().append(None, entry_type="VIEW", actor_id=None, payload={})
 
     resp = TestClient(app).get("/v1/_probe")
     assert resp.status_code == 501
     assert "app/modules/ledger" in resp.json()["detail"]
+
+
+def test_production_wiring_uses_unimplemented_integrations():
+    # Guards against a test double or no-op accidentally becoming the production default.
+    assert type(get_ledger()) is UnimplementedLedger
+    assert type(get_notifier()) is UnimplementedNotifier
