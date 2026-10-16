@@ -3,8 +3,8 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import AwareDatetime
 
+from app.core.types import IsoAwareDatetime
 from app.db.uow import UnitOfWork, get_uow
 from app.modules.auth.interface import Principal, get_principal
 from app.modules.events.models import EventState, EventType
@@ -32,7 +32,7 @@ def list_events_route(
     system_id: UUID | None = None,
     state: EventState | None = None,
     event_type: EventType | None = Query(None, alias="type"),
-    since: AwareDatetime | None = Query(None, description="Only events detected at or after"),
+    since: IsoAwareDatetime | None = Query(None, description="Only events detected at or after"),
     limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     offset: int = Query(0, ge=0),
     principal: Principal = Depends(get_principal),

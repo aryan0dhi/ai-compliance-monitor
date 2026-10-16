@@ -3,28 +3,42 @@
 from collections.abc import Iterator
 from functools import lru_cache
 
-from sqlalchemy import Engine, create_engine, text
+from sqlalchemy import URL, Engine, create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import get_settings
 
 
-@lru_cache
-def get_engine() -> Engine:
-    settings = get_settings()
+def create_app_engine(url: URL | str, *, pool_size: int = 5, max_overflow: int = 5) -> Engine:
+    """Engine with the application's connection settings (also used by integration tests)."""
     return create_engine(
-        settings.sqlalchemy_url,
+        url,
         pool_pre_ping=True,
-        pool_size=settings.db_pool_size,
-        max_overflow=settings.db_max_overflow,
+        pool_size=pool_size,
+        max_overflow=max_overflow,
         # Session time zone pinned to UTC so timestamptz values come back as UTC datetimes.
         connect_args={"connect_timeout": 5, "options": "-c timezone=UTC"},
     )
 
 
+def create_app_sessionmaker(engine: Engine) -> sessionmaker[Session]:
+    # expire_on_commit=False: services return ORM objects after their unit of work has closed.
+    return sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+
+
+@lru_cache
+def get_engine() -> Engine:
+    settings = get_settings()
+    return create_app_engine(
+        settings.sqlalchemy_url,
+        pool_size=settings.db_pool_size,
+        max_overflow=settings.db_max_overflow,
+    )
+
+
 @lru_cache
 def get_sessionmaker() -> sessionmaker[Session]:
-    return sessionmaker(bind=get_engine(), autoflush=False, expire_on_commit=False)
+    return create_app_sessionmaker(get_engine())
 
 
 def get_db() -> Iterator[Session]:

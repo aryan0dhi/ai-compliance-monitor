@@ -63,7 +63,8 @@ class SqlAlchemyUnitOfWork:
         exc: BaseException | None,
         tb: TracebackType | None,
     ) -> None:
-        assert self.session is not None
+        if self.session is None:
+            raise RuntimeError("unit of work exited without being entered")
         try:
             if exc_type is None:
                 self.session.commit()

@@ -12,7 +12,7 @@ from decimal import Decimal
 from enum import StrEnum
 from uuid import UUID, uuid4
 
-from sqlalchemy import CheckConstraint, ForeignKey, ForeignKeyConstraint, Index, text
+from sqlalchemy import CheckConstraint, ForeignKey, ForeignKeyConstraint, Index, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, check_in
@@ -94,17 +94,16 @@ class Event(Base):
             ondelete="RESTRICT",
             name="fk_event_triggering_sample",
         ),
-        # At most one breach event per sample, so a duplicate submission can never create a
-        # second event (D-04).
-        Index(
-            "uq_event_breach_per_sample",
-            "system_id",
-            "metric_name",
-            "metric_timestamp",
-            unique=True,
-            postgresql_where=text(f"type = '{EventType.THRESHOLD_BREACH}'"),
+        # At most one event per triggering sample, so a duplicate submission can never create a
+        # second event (D-04). Not partial: gap events have NULL metric columns, and NULLs never
+        # conflict. A full index also serves fk_event_triggering_sample's RESTRICT check when a
+        # metric_sample is deleted (a partial index can't be used for that).
+        UniqueConstraint(
+            "system_id", "metric_name", "metric_timestamp", name="uq_event_triggering_sample"
         ),
-        # GET /v1/events filters: system_id, state, type, since (detected_at).
+        # GET /v1/events: default ordering (newest first) and filters system_id, state, type,
+        # since (detected_at).
+        Index("ix_event_detected_at_id", "detected_at", "id"),
         Index("ix_event_system_id_detected_at", "system_id", "detected_at"),
         Index("ix_event_state", "state"),
         Index("ix_event_type", "type"),

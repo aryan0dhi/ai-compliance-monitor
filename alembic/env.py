@@ -30,16 +30,26 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
+def _run_with_connection(connection) -> None:
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        compare_type=True,
+    )
+    with context.begin_transaction():
+        context.run_migrations()
+
+
 def run_migrations_online() -> None:
+    # Integration tests pass an existing connection to a throwaway database via
+    # `config.attributes["connection"]` (Alembic cookbook pattern).
+    connection = config.attributes.get("connection")
+    if connection is not None:
+        _run_with_connection(connection)
+        return
     connectable = create_engine(get_settings().sqlalchemy_url, poolclass=pool.NullPool)
     with connectable.connect() as connection:
-        context.configure(
-            connection=connection,
-            target_metadata=target_metadata,
-            compare_type=True,
-        )
-        with context.begin_transaction():
-            context.run_migrations()
+        _run_with_connection(connection)
 
 
 if context.is_offline_mode():

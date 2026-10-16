@@ -152,24 +152,24 @@ def upgrade() -> None:
             "evidence_bundle_hash IS NULL OR evidence_bundle_hash ~ '^[0-9a-f]{64}$'",
             name=op.f("ck_event_evidence_bundle_hash_sha256"),
         ),
+        sa.UniqueConstraint(
+            "system_id",
+            "metric_name",
+            "metric_timestamp",
+            name=op.f("uq_event_triggering_sample"),
+        ),
     )
-    op.create_index(
-        "uq_event_breach_per_sample",
-        "event",
-        ["system_id", "metric_name", "metric_timestamp"],
-        unique=True,
-        postgresql_where=sa.text("type = 'threshold_breach'"),
-    )
+    op.create_index(op.f("ix_event_detected_at_id"), "event", ["detected_at", "id"])
     op.create_index(op.f("ix_event_system_id_detected_at"), "event", ["system_id", "detected_at"])
     op.create_index(op.f("ix_event_state"), "event", ["state"])
     op.create_index(op.f("ix_event_type"), "event", ["type"])
 
 
 def downgrade() -> None:
-    op.drop_index(op.f("ix_event_type"), table_name=op.f("event"))
-    op.drop_index(op.f("ix_event_state"), table_name=op.f("event"))
-    op.drop_index(op.f("ix_event_system_id_detected_at"), table_name=op.f("event"))
-    op.drop_index(op.f("uq_event_breach_per_sample"), table_name=op.f("event"))
+    op.drop_index(op.f("ix_event_type"), table_name="event")
+    op.drop_index(op.f("ix_event_state"), table_name="event")
+    op.drop_index(op.f("ix_event_system_id_detected_at"), table_name="event")
+    op.drop_index(op.f("ix_event_detected_at_id"), table_name="event")
     op.drop_table("event")
     op.drop_table("threshold_version")
     op.drop_table("metric_sample")

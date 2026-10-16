@@ -14,7 +14,7 @@ router = APIRouter(tags=["health"])
 logger = logging.getLogger(__name__)
 
 
-@router.get("/healthz")
+@router.get("/healthz", responses={503: {"description": "Database unreachable"}})
 def healthz(response: Response) -> dict[str, str]:
     try:
         check_database()

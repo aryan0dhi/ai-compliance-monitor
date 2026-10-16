@@ -61,6 +61,9 @@ class FakeThresholdRepository:
         ]
         return max(candidates, key=lambda t: t.valid_from, default=None)
 
+    def add(self, threshold: ThresholdVersion) -> None:
+        self.rows.append(threshold)
+
 
 class FakeEventRepository:
     def __init__(self) -> None:

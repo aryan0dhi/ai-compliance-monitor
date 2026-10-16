@@ -7,12 +7,32 @@ final, because cross-team tests depend on them.
 
 | ID | Topic | Status |
 |----|-------|--------|
-| D-01 | Threshold direction (above/below) | Decided (team) |
-| D-02 | `metric_type` column and `metric_name` naming | Decided (team) |
+| D-01 | Threshold direction (above/below) | Decided (team); **pod** to confirm for shared fixtures |
+| D-02 | `metric_type` column and `metric_name` naming | Decided (team); no API impact |
 | D-03 | Event type/state names: Section 5 vs Models 1–2 | Interim, **pod** |
 | D-04 | Duplicate metric submissions | Open, **pod**; temporary behavior |
 | D-05 | Evidence bundle window (±1 h) vs flag-time hashing | Open, **pod** |
 | D-06 | API details Section 5 leaves unspecified (Phase 3 endpoints) | Interim, **pod** |
+| D-07 | Configuration endpoints (thresholds, systems) are missing from Section 5 | Open, **pod** |
+| D-08 | INV-8 (every read is logged) vs Section 5 (listing has no state change) | Open, **pod** + audit owner |
+| D-09 | Repeated breaches: one event per breaching sample vs one per episode | Open, **pod** |
+| D-10 | Timestamp plausibility (future/very old samples) | Open, **pod** |
+
+## Agenda for the next pod meeting
+
+Ordered by impact on cross-team testing:
+
+1. **D-06**: pagination shape, who may read events, `400` for invalid queries. The other team's
+   harness will call these endpoints directly.
+2. **D-09**: one event per breaching sample (current) or one per breach episode. This changes
+   how many events and notifications AC-03/AC-04/AC-16 should expect.
+3. **D-04**: status codes for duplicate submissions (`200`/`409` now).
+4. **D-07**: how thresholds are configured, and the shared fixture format for
+   `/v1/test/reset`.
+5. **D-01**: shared fixtures must say whether each threshold is `above` or `below`.
+6. **D-03**: state names before Phase 4 (`DISPOSITIONED` vs `CLASSIFIED`, etc.).
+7. **D-08**: whether listing events writes ledger entries.
+8. **D-05** and **D-10**: needed before Phase 5 retention and evidence hashing.
 
 ## D-01: Threshold direction (REQ-03, AC-03)
 
@@ -76,7 +96,7 @@ error, or whether a duplicate can create a second flagged event.
 - A repeat with the same key but a different value or `metric_type` returns **`409`** and does not
   overwrite the stored sample.
 - A duplicate never creates a second event. This is enforced in code and by the
-  `uq_event_breach_per_sample` index.
+  `uq_event_triggering_sample` unique constraint.
 - Concurrent identical submissions are race-safe: the insert is
   `INSERT ... ON CONFLICT DO NOTHING`.
 - These status codes are interim and will be replaced by whatever the pod agrees on.
@@ -121,7 +141,9 @@ reading of the contract, or least privilege, when the contract is silent.
 | Malformed `event_id` in path | `404` if it doesn't exist | `404` (a malformed id can't exist) |
 | `flagged_event_id` when no breach | "also contains" on breach | Omitted from the response |
 | `value` | number | JSON number only. Strings, booleans, `NaN` and infinities get `400`. Stored as exact `numeric` |
-| `timestamp` | ISO-8601 UTC | Must carry an offset (naive gets `400`). Other offsets are accepted and normalized to UTC; responses use `Z` |
+| `timestamp` | ISO-8601 UTC | ISO-8601 string with an offset. Naive values and numbers (which a lenient parser would read as Unix time) get `400`. Other offsets are accepted and normalized to UTC; responses use `Z`. Values that fall outside year 1–9999 once converted to UTC get `400` |
+| `metric_name` | string | 1–255 characters, no leading/trailing whitespace, no control characters (published as a `pattern` in the OpenAPI document). Whitespace variants would silently miss their threshold |
+| `since` (GET /v1/events) | not specified | Compared with `detected_at` (inclusive). ISO-8601 with an offset only |
 | `system_id` | "UUID/string" in MetricSample, UUID in Event | UUID only (`400` otherwise) |
 | Unknown `system_id` with a valid key | not specified | `400` (should not occur once auth exists) |
 | `metric_type` differs from the configured threshold's | not specified | `400`, nothing stored. Silently mixing types could hide a breach |
@@ -130,6 +152,60 @@ reading of the contract, or least privilege, when the contract is silent.
 | Viewing an event (`GET /v1/events/{id}`) | adds a view to the audit log | Writes a `VIEW` ledger entry in the same transaction; if the ledger write fails, the request fails (`501` until the ledger exists) |
 | Listing events | "State Change: None" | No ledger entries |
 | `deadline_utc`, `harm_fields`, `revision_history` | Event fields | Always `null` / `null` / `[]` until Phase 4 |
+
+## D-07: Configuration endpoints (REQ-01, REQ-03, Section 6.1)
+
+**Gap.** Section 6.1 lists "configuration" endpoints in the Phase 3 contract, and REQ-01/REQ-03
+refer to a *configurable* sampling interval and *configured* thresholds. Section 5 defines no
+endpoint for creating monitored systems, setting `sampling_interval_s`, or adding thresholds.
+
+**Current behavior.**
+- Thresholds: `thresholds.service.add_threshold_version()` is the supported way to configure
+  one. It appends a new version (never updates), requires `valid_from` later than the latest
+  version, keeps `metric_type` consistent, and rejects non-finite limits. There is no HTTP
+  endpoint.
+- Systems and sampling interval: rows are created directly (e.g. by `/v1/test/reset`
+  fixtures). There is no service function or endpoint yet.
+
+**To agree with the pod.** Whether configuration is part of the cross-team contract (e.g.
+`POST /v1/systems/{id}/thresholds`, admin role) or only seeded through `/v1/test/reset`, and the
+shared fixture format (systems, thresholds with `direction`, API keys).
+
+## D-08: Logging reads of the event list (REQ-14, INV-8, Section 5.1)
+
+**Conflict.** INV-8 says every read of an event record *through any endpoint* produces exactly
+one ledger entry. Section 5.1 says `GET /v1/events` has no state change and only states the
+audit side effect for `GET /v1/events/{id}`.
+
+**Current behavior.** Only `GET /v1/events/{id}` writes a `VIEW` entry; listing writes none.
+
+**To agree.** If listing must be logged: one entry per returned event, or one `LIST` entry with
+the filter and returned ids? This mostly affects the ledger owner (volume, AC-15).
+
+## D-09: Repeated breaches (REQ-03, REQ-04, AC-16)
+
+**Ambiguity.** REQ-03 says "when a collected metric exceeds its threshold, generate a flagged
+event". A drift score that stays above its threshold for an hour at the default 5-minute
+interval produces 12 breaching samples.
+
+**Current behavior.** One event per breaching sample (the literal reading of REQ-03), so 12
+events and 12 reviewer notifications.
+
+**Options.** (a) Keep one per sample. (b) One event per *episode*: while an event for the same
+`(system_id, metric_name)` is still `FLAGGED`/`UNDER_REVIEW`, later breaches attach to it
+instead of creating new events. (b) needs a rule for when an episode ends, and changes what
+AC-03/AC-04/AC-16 count.
+
+## D-10: Timestamp plausibility (REQ-01, AC-01)
+
+**Gap.** Section 5 doesn't bound the metric `timestamp`. Samples dated far in the future (clock
+skew, bugs) are accepted today. They are judged against the threshold in force at that future
+time and stored with `received_at` = now. `last_seen_at` uses `received_at`, so gap detection
+isn't affected.
+
+**To agree.** Whether to reject timestamps more than N minutes ahead of the server clock (the
+test clock in the test environment), and whether very old backfilled samples should be
+accepted.
 
 ## Other notes
 

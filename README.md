@@ -9,6 +9,10 @@ The Phase 2 specification is the source of truth for requirements (REQ-xx), acce
 (AC-xx), the `/v1` API contract and the data model. Where its parts disagree, see
 [docs/spec-decisions.md](docs/spec-decisions.md).
 
+**Joining the project or building a module that plugs into metrics/events? Start with
+[HANDOFF.md](HANDOFF.md).** It covers the interfaces to implement, reusable functions,
+compatibility rules, testing patterns, open decisions and unverified security checks.
+
 ## Stack
 
 Python 3.12, FastAPI, PostgreSQL 16, SQLAlchemy 2, Alembic, Docker Compose. Hosted on AWS Lightsail.
@@ -46,7 +50,7 @@ pip install -e ".[dev]"
 docker compose up -d db                              # just the database
 alembic upgrade head
 uvicorn app.main:app --reload
-pytest -m "not integration"                          # unit tests only, no DB needed
+pytest                                               # integration tests skip without a DB
 ```
 
 ## Configuration
@@ -131,15 +135,25 @@ production Protocols.
 
 Until auth exists, every `/v1` call returns `401`. Once auth exists, a breach and an event view
 return `501` until the ledger and notifications modules are implemented. Open contract details
-are listed in [docs/spec-decisions.md](docs/spec-decisions.md) (D-04, D-06).
+are listed in [docs/spec-decisions.md](docs/spec-decisions.md) (D-04, D-06, D-09).
+
+Thresholds are configured with `thresholds.service.add_threshold_version()`. Section 5 has
+no configuration endpoint yet (D-07).
 
 ## Checks
 
 ```bash
-pytest -m "not integration"     # unit + HTTP contract tests (no database)
+pytest                          # unit + HTTP contract tests; integration tests skip without a DB
+pytest -m integration           # real-PostgreSQL tests (docker compose exec api pytest -m integration)
+pytest -m fuzz                  # Schemathesis fuzzing of /v1 (FUZZ_EXAMPLES=1000 for a deep run)
 ruff check . && ruff format --check .
 mypy                            # app/ and the test doubles' Protocol conformance
+bandit -q -r app                # static security analysis
+pip-audit --skip-editable       # known-vulnerable dependencies
 ```
+
+Integration tests create and drop their own throwaway database. With `REQUIRE_POSTGRES=1`
+(set in docker-compose) they fail instead of skipping when PostgreSQL is unreachable.
 
 ## Database schema
 

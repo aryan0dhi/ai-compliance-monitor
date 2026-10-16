@@ -113,13 +113,16 @@ Flagged threshold breaches and monitoring gaps. Type and state names follow the 
   flag time).
 - **Triggering sample**: `fk_event_triggering_sample` links `(system_id, metric_name, metric_timestamp)`
   to `metric_sample`. The sample must exist and can't be deleted while the event exists.
-- **One event per sample**: the partial unique index `uq_event_breach_per_sample` prevents a duplicate
-  submission from creating a second breach event (D-04).
+- **One event per sample**: the unique constraint `uq_event_triggering_sample` prevents a duplicate
+  submission from creating a second breach event (D-04). Gap events leave these columns NULL, and
+  NULLs never conflict. The constraint's index also serves the RESTRICT check of
+  `fk_event_triggering_sample` when a sample is deleted (the Phase 5 retention purge).
 - `detected_at`: clock time when the event was flagged (REQ-15). Set once and never updated (INV-13).
 - `retain_until`: see *Retention*.
 - `evidence_bundle_hash`: sha256 hex of the evidence bundle. **Nullable and not computed yet**
   (D-05).
-- Indexes support the `GET /v1/events` filters: `(system_id, detected_at)`, `state`, `type`.
+- Indexes support `GET /v1/events`: `(detected_at, id)` for the default newest-first ordering, plus
+  `(system_id, detected_at)`, `state` and `type` for the filters.
 
 ## Retention (REQ-05): storage only
 

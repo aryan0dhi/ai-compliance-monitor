@@ -13,6 +13,9 @@ ARG INSTALL_DEV=false
 
 COPY pyproject.toml ./
 COPY app ./app
+# The base image's pip has known advisories (pip-audit, 2026-10-16); it isn't used at runtime,
+# but upgrade it anyway.
+RUN pip install --upgrade "pip>=26.2"
 RUN if [ "$INSTALL_DEV" = "true" ]; then pip install ".[dev]"; else pip install .; fi
 
 COPY alembic.ini ./

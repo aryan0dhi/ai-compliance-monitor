@@ -18,6 +18,9 @@ dev = [
     "httpx>=0.27",
     "ruff>=0.6",
     "mypy>=1.11",
+    "schemathesis>=4.0",
+    "bandit>=1.7",
+    "pip-audit>=2.7",
 ]
 
 [build-system]
@@ -31,6 +34,7 @@ include = ["app*"]
 testpaths = ["tests"]
 markers = [
     "integration: needs a reachable PostgreSQL (run inside docker compose)",
+    "fuzz: Schemathesis schema-driven fuzzing (slower)",
 ]
 
 [tool.ruff]

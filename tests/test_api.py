@@ -113,8 +113,19 @@ class TestPostMetrics:
             {"value": True},
             {"timestamp": "2026-09-27T20:00:00"},
             {"timestamp": "yesterday"},
+            # Regressions found by edge-case probing (review, 2026-10-16):
+            {"value": 10**400},  # overflowed to null in the response
+            {"metric_name": "drift_score "},  # would never match its threshold
+            {"metric_name": " drift_score"},
+            {"metric_name": "a\u0000b"},  # PostgreSQL text rejects NUL -> 500
+            {"metric_name": "a\nb"},
+            {"timestamp": "0001-01-01T00:00:00+01:00"},  # UTC conversion overflow -> 500
+            {"timestamp": "9999-12-31T23:30:00-01:00"},
+            {"timestamp": 0},  # numbers were read as Unix time (found by Schemathesis)
+            {"timestamp": "1695844800"},
+            {"metric_name": "a\u0085b"},  # C1 control character
         ],
-        ids=lambda c: f"{next(iter(c))}={next(iter(c.values()))!r}",
+        ids=lambda c: f"{next(iter(c))}={str(next(iter(c.values())))[:20]!r}",
     )
     def test_invalid_body_is_400(self, api, uow, change):
         body = {**VALID_METRIC, **change}
@@ -125,6 +136,17 @@ class TestPostMetrics:
 
     @pytest.mark.parametrize("raw", ["{not json", '{"value": NaN}', "[]"])
     def test_malformed_json_is_400(self, api, raw):
+        resp = api.client.post(
+            "/v1/metrics", content=raw, headers={"Content-Type": "application/json"}
+        )
+        assert resp.status_code == 400
+
+    def test_lone_surrogate_in_metric_name_is_400(self, api):
+        # Escaped in JSON (as a real client would send it); not encodable as UTF-8 for PostgreSQL.
+        raw = (
+            f'{{"system_id": "{SYSTEM_ID}", "metric_name": "a\\ud8a1b", '
+            '"metric_type": "drift", "value": 0.1, "timestamp": "2026-09-27T20:00:00Z"}'
+        )
         resp = api.client.post(
             "/v1/metrics", content=raw, headers={"Content-Type": "application/json"}
         )
@@ -230,6 +252,8 @@ class TestGetEvents:
             "limit=0",
             "limit=201",
             "offset=-1",
+            "since=0.0",  # was read as Unix time 1970-01-01 (found by Schemathesis)
+            "since=1695844800",
         ],
     )
     def test_invalid_query_is_400(self, api, flagged, query):
