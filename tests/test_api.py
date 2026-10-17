@@ -252,6 +252,7 @@ class TestGetEvents:
             "limit=0",
             "limit=201",
             "offset=-1",
+            "offset=9223372036854775808",  # > bigint: was a 500 on PostgreSQL
             "since=0.0",  # was read as Unix time 1970-01-01 (found by Schemathesis)
             "since=1695844800",
         ],

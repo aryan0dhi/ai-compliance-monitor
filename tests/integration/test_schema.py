@@ -72,14 +72,19 @@ def conn(pg_sessionmaker, pg_engine):
 
 
 def violates(conn, sql: str, params: dict | None = None) -> bool:
-    """True if the statement is rejected with an IntegrityError (checked in a savepoint)."""
+    """True if the statement is rejected with an IntegrityError (checked in a savepoint).
+
+    On success the savepoint is released, so the row stays visible to later statements in the
+    test (e.g. a second insert that must collide with it). The `conn` fixture's outer
+    transaction still rolls everything back at the end of the test.
+    """
     sp = conn.begin_nested()
     try:
         conn.execute(text(sql), params or {})
     except IntegrityError:
         sp.rollback()
         return True
-    sp.rollback()
+    sp.commit()
     return False
 
 

@@ -1,6 +1,6 @@
 # Handoff: metrics, thresholds and event storage (REQ-01, REQ-03, REQ-05 storage)
 
-**Owner:** Aryan · **Branch:** `feature/metrics-database` · **Last updated:** 2026-10-16
+**Owner:** Aryan · **Branch:** `feature/metrics-database` · **Last updated:** 2026-10-17
 
 This is for the developers building authentication, audit logging, notifications, monitoring-gap
 detection, the background worker and the test routes. It covers what exists, how to plug in, and
@@ -16,7 +16,7 @@ what is still open. The Phase 2 submission is the source of truth; where it is a
 | REQ-03 threshold configuration | Service function only (`add_threshold_version`); no endpoint (D-07) |
 | `GET /v1/events`, `GET /v1/events/{id}` | Implemented, unit + contract tested |
 | REQ-05 storage (`retain_until`, constraint, RESTRICT FKs) | Implemented. **Retention enforcement/purge is Phase 5 and not implemented** |
-| Real-PostgreSQL integration tests | **Written but never run.** 52 tests skip until Docker works (backlog §10.1) |
+| Real-PostgreSQL integration tests | **52/52 pass** on PostgreSQL 16 in docker compose (2026-10-17), plus Schemathesis on PostgreSQL |
 | Pod decisions D-01, D-03 to D-10 | Interim behavior implemented; agreement pending (backlog §10.2) |
 | Auth, ledger, notifications | **Not implemented** (yours). Production defaults fail closed |
 
@@ -228,7 +228,7 @@ volume), **D-10** (gap semantics for odd timestamps).
 HawkScan (DAST) was skipped: there is no running deployment, no `HAWK_API_KEY`, and auth isn't
 implemented, so a scan would only see `401`s.
 
-**Done statically / in-process (2026-10-16):**
+**Done (2026-10-16/17):**
 - bandit (SAST) on `app/`: 0 issues after replacing one `assert` with an explicit check.
 - pip-audit: no vulnerable application dependencies. `pip` 25.2 itself has advisories; the
   Dockerfile now upgrades it.
@@ -240,6 +240,10 @@ implemented, so a scan would only see `401`s.
   hiding breaches, huge integers turning into `null`, and timestamp overflow causing `500`.
 - SQL is parameterized throughout (SQLAlchemy; no string-built queries in `app/`).
 - No secrets in git history or tracked files; `.env` is gitignored.
+- Schemathesis against **real PostgreSQL** (`tests/integration/test_fuzz_pg.py`, 1,000 requests
+  per endpoint): clean. It found one more defect, now fixed with a regression test:
+  `offset` above PostgreSQL's bigint range caused a `500`.
+- pip-audit inside the built API image: no known vulnerabilities (Python packages only).
 
 **Still unverified (needs a running deployment, Docker and/or your modules):**
 
@@ -247,7 +251,6 @@ implemented, so a scan would only see `401`s.
 |---|---|---|
 | Authentication and authorization on the live service | Auth not implemented | auth |
 | API key storage (hashed), key scoping, brute force / rate limiting | Auth not implemented | auth |
-| Fuzzing against the real database (encoding, constraint and driver errors) | Fuzz runs use fakes; needs Docker | Aryan |
 | SQL injection and other DAST checks (HawkScan) | No running app plus `HAWK_API_KEY` | team |
 | Security headers (HSTS, `X-Content-Type-Options`, ...) and TLS on Lightsail | Not configured; deployment not set up | deployment |
 | Request body size limits and rate limiting on `POST /v1/metrics` | None configured | team |
@@ -257,7 +260,7 @@ implemented, so a scan would only see `401`s.
 | `/v1/test/*` returning `404` in production | Routes not built yet | testing |
 | Webhook verification ping (SSRF) | Not built | notifications |
 | Ledger tamper detection (AC-06) | Not built | ledger |
-| Container image OS packages | Needs Docker to build and scan | team |
+| Container image OS (Debian) packages | pip-audit only covers Python packages; run an image scanner (e.g. `docker scout cves`) | team |
 
 To run HawkScan later: start the stack (`docker compose up`), set `HAWK_API_KEY`, configure
 `stackhawk.yml` with the base URL and a test API key once auth exists, then run the
@@ -265,16 +268,16 @@ To run HawkScan later: start the stack (`docker compose up`), set `HAWK_API_KEY`
 
 ## 10. Backlog for this area
 
-### 10.1 Blocked on Docker / PostgreSQL (verification not yet done)
+### 10.1 Docker / PostgreSQL verification (done 2026-10-17)
 
-Docker Desktop on the owner's machine needs an update. Until it works, the SQL repositories,
-migration 0002 and the database constraints have **only** been checked offline (DDL compiled
-and compared with the models), never executed.
+Run on Docker Desktop (engine 29.1.3) with `postgres:16-alpine`, inside the api container
+(`REQUIRE_POSTGRES=1`, so nothing could silently skip).
 
-- [ ] `cp .env.example .env` (set `POSTGRES_PASSWORD`), then `docker compose up --build -d`.
-      Confirm the api container runs `alembic upgrade head` and `GET /healthz` returns `200`.
-- [ ] `docker compose exec api pytest`. All 52 integration tests must **pass**, not skip
-      (`REQUIRE_POSTGRES=1` is set in compose). They cover:
+- [x] `docker compose up --build -d`: the api container ran `alembic upgrade head`
+      (0001 → 0002), `alembic current` reports `0002 (head)`, `GET /healthz` returns `200`.
+- [x] `docker compose exec api pytest -m integration`: **52 passed**. The first run had 3
+      failures, all caused by the `violates()` test helper discarding successful inserts; fixed
+      in the helper, schema unchanged. Covered:
       - migration upgrade → downgrade → upgrade round trip
       - live autogenerate check: models and migrations have no drift
       - every CHECK, UNIQUE and RESTRICT foreign key, including the six-month retention
@@ -282,9 +285,16 @@ and compared with the models), never executed.
       - `retain_until_for()` matching PostgreSQL interval arithmetic at month ends and leap days
       - 8 concurrent identical submissions → exactly 1 sample and 1 event
       - ingestion, threshold configuration, event queries and HTTP on real SQL
-- [ ] Run `pytest -m fuzz` with `get_uow` pointed at PostgreSQL to catch driver and encoding
-      errors the in-memory fakes can't show.
-- [ ] Remove the "written but never run" notes from §1 and README once the above passes.
+- [x] Schemathesis on PostgreSQL (`pytest -m "integration and fuzz"`, 1,000 requests per
+      endpoint): clean after fixing the `offset` bigint overflow it found.
+- [x] Full container suite: **226 passed, 0 skipped**.
+
+To re-run: `docker compose up --build -d && docker compose exec api pytest`.
+
+Machine note: Docker Desktop first failed because its disk image (`Docker.raw`) was owned by
+root, and then because the filesystem inside it was corrupted. The fix was to `chown` it and
+move it aside (`Docker.raw.broken-2026-10-17`, safe to delete). Docker Desktop 4.56.0 still
+shows an available update.
 
 ### 10.2 Blocked on pod decisions ([docs/spec-decisions.md](docs/spec-decisions.md))
 

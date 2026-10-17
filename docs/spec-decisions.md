@@ -132,7 +132,7 @@ reading of the contract, or least privilege, when the contract is silent.
 
 | Topic | Section 5 says | Interim behavior |
 |---|---|---|
-| Pagination format | "paginated array of Event summaries" | `limit` (1–200, default 50) and `offset` (≥ 0) query params. Response `{"items": [...], "total", "limit", "offset"}` |
+| Pagination format | "paginated array of Event summaries" | `limit` (1–200, default 50) and `offset` (0 to 2⁶³−1, PostgreSQL's bigint limit) query params. Response `{"items": [...], "total", "limit", "offset"}` |
 | List ordering | not specified | Newest `detected_at` first; `event_id` breaks ties so pages are stable |
 | Event summary fields | not specified | `event_id, system_id, type, state, detected_at, metric_name` |
 | Invalid list query (bad `state`, naive `since`, `limit=0`, ...) | only `401` listed | `400`, same as malformed bodies |

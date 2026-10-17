@@ -17,6 +17,8 @@ router = APIRouter(prefix="/events", tags=["events"])
 
 DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 200
+# PostgreSQL OFFSET is a bigint; larger values were a 500 (found by fuzzing on PostgreSQL).
+MAX_OFFSET = 2**63 - 1
 
 
 @router.get(
@@ -34,7 +36,7 @@ def list_events_route(
     event_type: EventType | None = Query(None, alias="type"),
     since: IsoAwareDatetime | None = Query(None, description="Only events detected at or after"),
     limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
-    offset: int = Query(0, ge=0),
+    offset: int = Query(0, ge=0, le=MAX_OFFSET),
     principal: Principal = Depends(get_principal),
     uow: UnitOfWork = Depends(get_uow),
 ) -> EventPageOut:
