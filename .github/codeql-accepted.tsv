@@ -1,0 +1,5 @@
+# CodeQL findings reviewed and accepted. Columns (tab-separated): rule id, file, reason.
+# The CI gate ignores a finding only when its rule AND file match a line here; anything else
+# still fails the job. Keep reasons specific, and remove a line when the code changes.
+py/clear-text-logging-sensitive-data	app/cli.py	The admin CLI shows a newly issued API key once to the operator in their terminal, by design (like GitHub/AWS key creation). It is printed, never logged, and only its sha256 is stored.
+py/weak-sensitive-data-hashing	app/modules/auth/interface.py	API keys are 256-bit random tokens, not user passwords, so there is no dictionary to attack; an indexed SHA-256 lookup is the standard for such tokens. A slow password hash (scrypt/argon2) would cost CPU on every request without adding security.
