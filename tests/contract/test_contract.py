@@ -260,17 +260,8 @@ def gap_ids(api) -> dict[str, dict]:
     return {e["event_id"]: e for e in items(page.json())}
 
 
-@covers(
-    reqs=["REQ-02", "REQ-04"],
-    acs=["AC-02"],
-    endpoints=["POST /v1/test/clock/advance", "POST /v1/test/reset", "GET /v1/events"],
-    model1=["GAP_OPEN", "REVIEWER_NOTIFIED", "GAP_CLOSED"],
-    model4=["INV-12"],
-    decision="D-12",
-)
-def test_ac02_gap_after_three_missed_intervals_not_two(api, receiver, test_routes):
-    if not test_routes:
-        pytest.skip("service has no /v1/test routes (time-dependent AC-02 needs the test clock)")
+def open_gap(api) -> dict:
+    """Send one sample, then withhold data until a gap opens. Checks the 2-interval boundary."""
     interval = api.target.interval_s
     known = set(gap_ids(api))
     assert send(api, 0.1)[0].status_code == 201  # last data now
@@ -284,7 +275,7 @@ def test_ac02_gap_after_three_missed_intervals_not_two(api, receiver, test_route
     time.sleep(GAP_SETTLE_S)
     assert set(gap_ids(api)) == known
 
-    # 3 intervals: a gap event appears and the reviewer is notified.
+    # 3 intervals: a gap event appears.
     advance(interval)
 
     def new_gap():
@@ -292,22 +283,54 @@ def test_ac02_gap_after_three_missed_intervals_not_two(api, receiver, test_route
 
     gap = api.wait_for(new_gap, "a gap event")
     assert gap["state"] not in ("UNDER_REVIEW", "DISPOSITIONED")  # INV-12
-    if receiver.url is not None:
-        api.wait_for(
-            lambda: any(b.get("event_id") == gap["event_id"] for b in receiver.bodies()),
-            "the gap notification webhook",
-        )
-        api.wait_for(
-            lambda: gap_ids(api)[gap["event_id"]]["state"] == "REVIEWER_NOTIFIED",
-            "state REVIEWER_NOTIFIED",
-        )
+    return gap
 
-    # Data resumes: the gap closes with its duration (Ex-3).
+
+def close_gap(api, gap: dict) -> None:
+    """Data resumes: the gap closes with its duration (Ex-3)."""
     assert send(api, 0.1)[0].status_code == 201
     api.wait_for(lambda: gap_ids(api)[gap["event_id"]]["state"] == "GAP_CLOSED", "GAP_CLOSED")
     detail = api.call("GET", f"/v1/events/{gap['event_id']}", as_="viewer").json()
     if "gap_duration_seconds" in detail:
-        assert detail["gap_duration_seconds"] >= 3 * interval
+        assert detail["gap_duration_seconds"] >= 3 * api.target.interval_s
+
+
+@covers(
+    reqs=["REQ-02"],
+    acs=["AC-02"],
+    endpoints=["POST /v1/test/clock/advance", "POST /v1/test/reset", "GET /v1/events"],
+    model1=["GAP_OPEN", "GAP_CLOSED"],
+    model4=["INV-12"],
+    decision="D-12",
+)
+def test_ac02_gap_after_three_missed_intervals_not_two(api, test_routes):
+    if not test_routes:
+        pytest.skip("service has no /v1/test routes (time-dependent AC-02 needs the test clock)")
+    close_gap(api, open_gap(api))
+
+
+@covers(
+    reqs=["REQ-02", "REQ-04"],
+    acs=["AC-02"],
+    endpoints=["POST /v1/webhooks", "POST /v1/test/clock/advance"],
+    model1=["REVIEWER_NOTIFIED"],
+    decision="D-12",
+)
+def test_ac02_gap_notification_reaches_the_reviewer(api, receiver, test_routes):
+    if not test_routes:
+        pytest.skip("service has no /v1/test routes (time-dependent AC-02 needs the test clock)")
+    if receiver.url is None:
+        pytest.skip("CONTRACT_WEBHOOKS=off")
+    gap = open_gap(api)
+    api.wait_for(
+        lambda: any(b.get("event_id") == gap["event_id"] for b in receiver.bodies()),
+        "the gap notification webhook",
+    )
+    api.wait_for(
+        lambda: gap_ids(api)[gap["event_id"]]["state"] == "REVIEWER_NOTIFIED",
+        "state REVIEWER_NOTIFIED",
+    )
+    close_gap(api, gap)
 
 
 @covers(reqs=["REQ-06"], endpoints=["GET /v1/ledger/verify"], model4=["INV-7"])

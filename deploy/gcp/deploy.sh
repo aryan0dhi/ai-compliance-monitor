@@ -54,7 +54,9 @@ release="$(mktemp -d)"
 trap 'rm -rf "$release"' EXIT
 # autocrlf off: the release runs on Linux, so it must keep the repository's LF line endings.
 git -c core.autocrlf=false archive --format=tar.gz -o "$release/release.tgz" HEAD
-g compute scp --zone "$ZONE" "$release/release.tgz" deploy/gcp/remote-up.sh deploy/gcp/issue-keys.sh "$VM:~/"
+# "$VM:." is the remote home directory for both OpenSSH scp and PuTTY's pscp (Windows), which
+# doesn't expand "~/".
+g compute scp --zone "$ZONE" "$release/release.tgz" deploy/gcp/remote-up.sh deploy/gcp/issue-keys.sh "$VM:."
 
 g compute ssh "$VM" --zone "$ZONE" --command "SITE_ADDRESS='$SITE_ADDRESS' bash ~/remote-up.sh"
 echo "== deployed: https://$SITE_ADDRESS   (health: https://$SITE_ADDRESS/healthz)"
