@@ -218,3 +218,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Server-side coverage of cross-team runs (docker-compose.coverage.yml)
+coverage-data/
+# Contract-suite reports (tests/contract)
+contract-report.*

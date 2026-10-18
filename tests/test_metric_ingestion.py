@@ -257,14 +257,15 @@ class TestIntegrationsInSameTransaction:
         assert uow.systems.get(system_id).last_seen_at is None
         assert uow.rollbacks == 1 and uow.commits == 0
 
-    def test_production_integrations_block_breach_commit(
+    def test_production_integrations_need_a_database_session(
         self, uow, clock, system_id, drift_threshold
     ):
-        """With the real (unimplemented) ledger and notifier, a breach cannot be committed."""
+        """The real ledger and notifier refuse to run outside a database transaction, so a breach
+        can't commit without them. (They are exercised on PostgreSQL in the integration tests.)"""
         from app.modules.ledger.interface import get_ledger
         from app.modules.notifications.interface import get_notifier
 
-        with pytest.raises(UnimplementedError):
+        with pytest.raises(RuntimeError, match="session"):
             submit(uow, get_ledger(), get_notifier(), clock, system_id=system_id, value="0.35")
         assert uow.metrics.rows == {} and uow.events.rows == {}
 

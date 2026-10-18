@@ -42,7 +42,7 @@ def seeded(uow):
     events = [
         make_event(a, minutes=0),
         make_event(a, minutes=10, state="UNDER_REVIEW"),
-        make_event(b, minutes=20, type_="monitoring_gap"),
+        make_event(b, minutes=20, type_="monitoring_gap", state="GAP_OPEN"),
         make_event(b, minutes=30),
     ]
     for e in events:
@@ -107,12 +107,13 @@ class TestGetEvent:
         assert ledger.calls == []
 
     def test_view_fails_when_ledger_unavailable(self, uow, seeded):
-        """REQ-14: no unaudited views. The production ledger is unimplemented, so this fails."""
-        from app.modules.ledger.interface import get_ledger
+        """REQ-14: no unaudited views. If the VIEW entry can't be written, the read fails."""
+        from tests.fakes import RecordingLedger
 
         _, _, events = seeded
+        failing = RecordingLedger(fail_with=UnimplementedError("x", "REQ-14", "ledger"))
         with pytest.raises(UnimplementedError):
-            get_event(events[0].id, principal=VIEWER, uow=uow, ledger=get_ledger())
+            get_event(events[0].id, principal=VIEWER, uow=uow, ledger=failing)
         assert uow.rollbacks == 1
 
     def test_system_keys_cannot_read(self, uow, ledger, seeded):

@@ -5,7 +5,7 @@ from decimal import Decimal
 from enum import StrEnum
 from uuid import UUID
 
-from sqlalchemy import ForeignKey
+from sqlalchemy import ForeignKey, Index
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, check_in, check_not_nan
@@ -23,6 +23,8 @@ class MetricSample(Base):
     __table_args__ = (
         check_in("metric_type", MetricType, name="metric_type"),
         check_not_nan("value", name="value_not_nan"),
+        # REQ-02: when data resumed after a gap; also supports AC-01 arrival-time checks.
+        Index("ix_metric_sample_system_id_received_at", "system_id", "received_at"),
     )
 
     # Primary key (system_id, metric_name, sampled_at) makes ingestion idempotent (Model 2).

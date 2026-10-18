@@ -1,0 +1,24 @@
+# Server-side code coverage while another team runs its suite against this service
+# (docs/cross-team-testing.md §3). Use on a TEST deployment only:
+#   mkdir -p coverage-data && docker compose -f docker-compose.yml -f docker-compose.coverage.yml up -d
+#   ... the other team runs its suite ...
+#   docker compose stop api worker            # coverage saves on SIGTERM (pyproject.toml)
+#   docker compose run --rm --no-deps -e COVERAGE_FILE=/srv/coverage/.coverage api \
+#       sh -c "coverage combine /srv/coverage && coverage report"
+services:
+  api:
+    command:
+      - sh
+      - -c
+      - alembic upgrade head && exec coverage run -p -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+    environment:
+      COVERAGE_FILE: /srv/coverage/.coverage
+    volumes:
+      - ./coverage-data:/srv/coverage
+
+  worker:
+    command: ["coverage", "run", "-p", "-m", "app.worker"]
+    environment:
+      COVERAGE_FILE: /srv/coverage/.coverage
+    volumes:
+      - ./coverage-data:/srv/coverage

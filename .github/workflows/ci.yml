@@ -21,7 +21,10 @@ jobs:
       cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
     env:
       COVERAGE_MIN: 80
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/app_test
+      # +psycopg: the app uses psycopg 3; a bare postgresql:// URL selects psycopg2 (not installed).
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/app_test
+      # Integration tests fail instead of silently skipping if the service database is missing.
+      REQUIRE_POSTGRES: "1"
     # Throwaway database for tests and the Alembic check. It starts even when the job skips.
     services:
       postgres:

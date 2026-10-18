@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
-from sqlalchemy import Insert
+from sqlalchemy import Insert, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -22,6 +22,10 @@ class MetricRepository(Protocol):
         Returns True if inserted, False if a sample with that key already existed. Must be safe
         under concurrent submissions of the same key.
         """
+        ...
+
+    def first_received_after(self, system_id: UUID, after: datetime) -> datetime | None:
+        """Earliest received_at later than `after`: when data resumed after a gap (REQ-02)."""
         ...
 
 
@@ -52,3 +56,9 @@ class SqlMetricRepository:
 
     def add_if_absent(self, sample: MetricSample) -> bool:
         return self._session.execute(build_insert_if_absent(sample)).first() is not None
+
+    def first_received_after(self, system_id: UUID, after: datetime) -> datetime | None:
+        stmt = select(func.min(MetricSample.received_at)).where(
+            MetricSample.system_id == system_id, MetricSample.received_at > after
+        )
+        return self._session.scalar(stmt)

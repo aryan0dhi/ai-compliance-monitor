@@ -14,7 +14,7 @@ from uuid import UUID
 
 import pytest
 import schemathesis
-from fastapi import Request
+from fastapi import HTTPException, Request
 from hypothesis import HealthCheck, reject, settings
 
 from app.core.clock import get_clock
@@ -23,12 +23,14 @@ from app.main import create_app
 from app.modules.auth.interface import Role, get_principal
 from app.modules.ledger.interface import get_ledger
 from app.modules.notifications.interface import get_notifier
+from app.modules.notifications.router import get_webhook_sender
 from tests.conftest import T0
 from tests.fakes import (
     FakeUnitOfWork,
     FixedClock,
     RecordingLedger,
     RecordingNotifier,
+    RecordingSender,
     system_principal,
     user_principal,
 )
@@ -36,6 +38,7 @@ from tests.fakes import (
 pytestmark = pytest.mark.fuzz
 
 SYSTEM_ID = UUID("550e8400-e29b-41d4-a716-446655440000")
+VALID_AUTH = "Bearer fuzz-test-key"
 
 
 def _app():
@@ -52,9 +55,14 @@ def _app():
     app = create_app()
 
     def principal(request: Request):
-        # A system key for writes and a viewer for reads, so both paths are exercised.
-        if request.method == "POST":
+        # Like the real dependency, a missing or unknown key is 401 (Schemathesis checks both).
+        if request.headers.get("authorization") != VALID_AUTH:
+            raise HTTPException(401, "Missing or invalid API key")
+        # The role each endpoint needs, so requests reach validation and business logic.
+        if request.url.path == "/v1/metrics":
             return system_principal(SYSTEM_ID)
+        if request.url.path == "/v1/webhooks":
+            return user_principal(Role.ADMIN)
         return user_principal(Role.VIEWER)
 
     app.dependency_overrides.update(
@@ -64,6 +72,7 @@ def _app():
             get_ledger: lambda: RecordingLedger(),
             get_notifier: lambda: RecordingNotifier(),
             get_clock: lambda: FixedClock(T0),
+            get_webhook_sender: lambda: RecordingSender(),
         }
     )
     return app
@@ -72,6 +81,18 @@ def _app():
 APP = _app()
 # /healthz depends on a live database, which unit runs don't have; fuzz only the /v1 contract.
 schema = schemathesis.openapi.from_asgi("/openapi.json", APP).include(path_regex="^/v1/")
+
+
+@schema.auth()
+class FuzzKey:
+    """Authenticates generated requests; Schemathesis still sends its own missing/invalid-key
+    probes (checks ST203/ST401), which must get 401."""
+
+    def get(self, case, ctx):
+        return VALID_AUTH
+
+    def set(self, case, data, ctx):
+        case.headers = {**(case.headers or {}), "Authorization": data}
 
 
 @schema.parametrize()

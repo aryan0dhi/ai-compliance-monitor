@@ -1,5 +1,6 @@
 """Shared pydantic field types for API schemas."""
 
+import re
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Annotated, Any
@@ -26,6 +27,19 @@ def _require_iso_8601(value: Any) -> Any:
     except ValueError as exc:
         raise ValueError("must be an ISO-8601 date-time string") from exc
 
+
+def _require_integer_string(value: Any) -> Any:
+    """Query parameters arrive as strings; lax mode would read "0.0" or "1e3" as integers."""
+    if isinstance(value, str) and not re.fullmatch(r"[+-]?[0-9]+", value):
+        raise ValueError("must be an integer")
+    return value
+
+
+# Integer query parameters: digits only (found by Schemathesis: "after_seq=0.0" was accepted).
+# Use as `name: Annotated[int, Query(ge=..., le=...), INTEGER_QUERY] = default`: FastAPI drops
+# validators from a bare Annotated alias, and putting Query first keeps minimum/maximum in the
+# OpenAPI schema.
+INTEGER_QUERY = BeforeValidator(_require_integer_string)
 
 # Decimals are stored exactly (numeric) but emitted as JSON numbers, as Section 5.2 specifies.
 JsonDecimal = Annotated[Decimal, PlainSerializer(float, return_type=float, when_used="json")]

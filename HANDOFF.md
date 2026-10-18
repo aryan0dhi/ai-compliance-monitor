@@ -16,14 +16,14 @@ what is still open. The Phase 2 submission is the source of truth; where it is a
 | REQ-03 threshold configuration | Service function only (`add_threshold_version`); no endpoint (D-07) |
 | `GET /v1/events`, `GET /v1/events/{id}` | Implemented, unit + contract tested |
 | REQ-05 storage (`retain_until`, constraint, RESTRICT FKs) | Implemented. **Retention enforcement/purge is Phase 5 and not implemented** |
-| Real-PostgreSQL integration tests | **52/52 pass** on PostgreSQL 16 in docker compose (2026-10-17), plus Schemathesis on PostgreSQL |
-| Pod decisions D-01, D-03 to D-10 | Interim behavior implemented; agreement pending (backlog §10.2) |
-| Auth, ledger, notifications | **Not implemented** (yours). Production defaults fail closed |
+| Real-PostgreSQL integration tests | **114 pass** on PostgreSQL 16 (2026-10-18), plus Schemathesis on PostgreSQL with the real auth, ledger and notifier |
+| Pod decisions D-01, D-03 to D-16 | Interim behavior implemented; agreement pending (backlog §10.2, spec-decisions D-11 to D-16) |
+| REQ-13 auth (API keys, roles), REQ-06/14 ledger, REQ-04 notifications, REQ-02 gaps, test routes, worker | **Implemented 2026-10-18** (§4 describes how; [docs/cross-team-testing.md](docs/cross-team-testing.md) for podmates) |
 
-What a caller sees today:
-- Every `/v1` request returns **`401`** (auth fails closed).
-- Once auth exists, a threshold breach or an event view returns **`501`** and stores nothing,
-  until the ledger and notifications are implemented. Non-breaching metrics will store normally.
+What a caller sees today: a valid key is required (`401` otherwise; issue keys with
+`python -m app.cli`). A breach stores the event, its `FLAGGED` ledger entry and an outbox row in
+one transaction, and the worker delivers the notification to registered webhooks. Silence for 3
+intervals opens a gap event.
 
 ## 2. Getting started
 
@@ -63,17 +63,20 @@ HTTP ─► router.py ──► service.py ────────────�
   `get_uow`, `get_ledger`, `get_notifier`, `get_clock`. Tests replace them with
   `app.dependency_overrides`; production wiring is never patched.
 
-## 4. Interfaces you implement
+## 4. Integration interfaces
 
-All live in `app/modules/<module>/interface.py`. **Keep the Protocol signatures**; my code calls
-them. If one must change, tell me and update `tests/fakes.py` (mypy checks the doubles against
-the Protocols, so drift fails CI).
+All live in `app/modules/<module>/interface.py`. **Keep the Protocol signatures**; callers depend
+on them. If one must change, update `tests/fakes.py` too (mypy checks the doubles against the
+Protocols, so drift fails CI).
 
-When you implement one, replace the `Unimplemented*` default and update
-`tests/test_interfaces.py::test_production_wiring_uses_unimplemented_integrations` (it asserts
-the fail-closed defaults and should then assert your class instead).
+> **Update 2026-10-18:** all of the interfaces below are now implemented with the production
+> classes noted in each subsection; `tests/test_interfaces.py::test_production_wiring_uses_real_integrations`
+> asserts the wiring. The original guidance is kept because it is still the contract the
+> implementations follow.
 
 ### 4.1 Authentication (REQ-13): `app/modules/auth/interface.py`
+
+Implemented: `get_principal` looks up the sha256 of the bearer key (`app_user` + `api_key`, migration 0003); keys come from `python -m app.cli create-user`.
 
 ```python
 def get_principal() -> Principal          # FastAPI dependency; currently raises 401
@@ -97,6 +100,8 @@ class Role: SYSTEM | VIEWER | REVIEWER | ADMIN
 
 ### 4.2 Audit ledger (REQ-06, REQ-14, REQ-16): `app/modules/ledger/interface.py`
 
+Implemented: `SqlLedgerWriter` (hash chain, D-14), `/v1/ledger/export`, `/v1/ledger/verify`, `/v1/events/{id}/audit`. REQ-16 (crypto-shredding) is Phase 5.
+
 ```python
 class LedgerWriter(Protocol):
     def append(self, session, *, entry_type: str, actor_id: UUID | None,
@@ -117,6 +122,8 @@ def get_ledger() -> LedgerWriter          # returns UnimplementedLedger today (r
 
 ### 4.3 Notifications (REQ-04, REQ-11): `app/modules/notifications/interface.py`
 
+Implemented: `OutboxNotifier`, `POST /v1/webhooks` (with SSRF guard), delivery by the worker (D-15). REQ-11 reminders are Phase 4.
+
 ```python
 class Notifier(Protocol):
     def enqueue(self, session, *, notification_type: str, event_id: UUID, payload: dict) -> None
@@ -132,6 +139,8 @@ def get_notifier() -> Notifier            # returns UnimplementedNotifier today 
 - **D-09** affects you: today every breaching sample creates an event, and so a notification.
 
 ### 4.4 Monitoring-gap detection (REQ-02)
+
+Implemented in `app/modules/monitoring_gaps/service.py`. One deviation from the note below: the boundary is inclusive (`>=`), following Ex-3 and AC-02 (D-11). Gap states are Model 1's (D-12).
 
 There is no interface to implement; you build on the shared tables:
 
@@ -154,6 +163,8 @@ There is no interface to implement; you build on the shared tables:
 
 ### 4.5 Test routes, reset and clock (Section 5.1, 5.3)
 
+Implemented in `app/modules/testing/` (D-16). The simulated clock is stored in the database so the API and worker agree.
+
 - **Clock**: everything reads time through `app.core.clock.get_clock()`. Implement the simulated
   clock and install it with `set_clock(...)` in the test environment. My code only ever calls
   `clock.now()`.
@@ -167,7 +178,8 @@ There is no interface to implement; you build on the shared tables:
 
 ### 4.6 Background worker
 
-Not started. Run it as a second docker-compose service from the same image (placeholder comment
+Implemented: `app/modules/worker/runner.py`, run as `python -m app.worker` (docker-compose
+`worker` service). Originally: Run it as a second docker-compose service from the same image (placeholder comment
 in `docker-compose.yml`) with a single active instance (advisory lock, Q7.2). Use `get_uow()` /
 `SqlAlchemyUnitOfWork` and `get_clock()` exactly as the API does.
 
@@ -245,21 +257,24 @@ implemented, so a scan would only see `401`s.
   `offset` above PostgreSQL's bigint range caused a `500`.
 - pip-audit inside the built API image: no known vulnerabilities (Python packages only).
 
-**Still unverified (needs a running deployment, Docker and/or your modules):**
+**Verified 2026-10-18 (Phase 3 integrations):** auth fails closed on every endpoint (unit,
+fuzz and live contract run); `/v1/test/*` are `404` with `APP_ENV=production` even if
+`ENABLE_TEST_ROUTES` is set; webhook SSRF guard (private/loopback/link-local/metadata/IPv4-mapped
+addresses refused, address pinned, no redirects, no proxies) with a real-socket test; ledger
+tamper detection by direct SQL edit/delete (AC-06, Ex-5); bandit clean; pip-audit clean on both
+lockfiles; Schemathesis 1,000 requests per endpoint on fakes and PostgreSQL.
+
+**Still unverified (needs a running deployment and/or Docker):**
 
 | Check | Why it's open | Owner |
 |---|---|---|
-| Authentication and authorization on the live service | Auth not implemented | auth |
-| API key storage (hashed), key scoping, brute force / rate limiting | Auth not implemented | auth |
+| Brute force / rate limiting on API keys | Keys are 256-bit random (brute force infeasible) and stored hashed; no rate limit yet | team |
 | SQL injection and other DAST checks (HawkScan) | No running app plus `HAWK_API_KEY` | team |
 | Security headers (HSTS, `X-Content-Type-Options`, ...) and TLS on Lightsail | Not configured; deployment not set up | deployment |
 | Request body size limits and rate limiting on `POST /v1/metrics` | None configured | team |
 | CORS policy for the reviewer web UI | Not configured (browsers block cross-origin by default) | UI owner |
 | `/docs` and `/openapi.json` exposed in production | Decide whether to disable when `APP_ENV=production` | team |
-| `501` responses include internal module paths | Acceptable while modules are missing; remove later | ledger / notifications |
-| `/v1/test/*` returning `404` in production | Routes not built yet | testing |
-| Webhook verification ping (SSRF) | Not built | notifications |
-| Ledger tamper detection (AC-06) | Not built | ledger |
+| Webhook secrets stored in clear (needed for HMAC signing) | Encrypt at rest with REQ-16's key handling | Phase 5 |
 | Container image OS (Debian) packages | pip-audit only covers Python packages; run an image scanner (e.g. `docker scout cves`) | team |
 
 To run HawkScan later: start the stack (`docker compose up`), set `HAWK_API_KEY`, configure

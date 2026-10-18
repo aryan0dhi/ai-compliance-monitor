@@ -4,28 +4,20 @@ Every read or write of an event record must append exactly one ledger entry in t
 transaction as the change it records (Phase 2, Q7.2 Decision 1; INV-8).
 
 Callers receive a `LedgerWriter` through `get_ledger()` (a FastAPI dependency) and pass their
-unit-of-work session to `append`.
-
-NOT IMPLEMENTED. The production writer is `UnimplementedLedger`, which raises UnimplementedError.
-That aborts the caller's transaction, so no event state change or view can commit without its
-audit entry. The ledger owner replaces `UnimplementedLedger` with the real hash-chain writer and
-keeps the `LedgerWriter` signature.
+unit-of-work session to `append`. The production writer (`SqlLedgerWriter`) hash-chains each entry
+to the previous one (REQ-06); if it fails, the caller's transaction rolls back, so no state change
+or view commits without its audit entry.
 """
 
-from enum import StrEnum
 from typing import Any, Protocol
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from app.core.errors import UnimplementedError
+from app.modules.ledger.models import LedgerEntryType
+from app.modules.ledger.writer import SqlLedgerWriter
 
-
-class LedgerEntryType(StrEnum):
-    """Model 2 ledger_entry.entry_type values used so far. The ledger owner adds the rest."""
-
-    FLAGGED = "FLAGGED"
-    VIEW = "VIEW"
+__all__ = ["LedgerEntryType", "LedgerWriter", "get_ledger"]
 
 
 class LedgerWriter(Protocol):
@@ -42,20 +34,7 @@ class LedgerWriter(Protocol):
         ...
 
 
-class UnimplementedLedger:
-    def append(
-        self,
-        session: Session | None,
-        *,
-        entry_type: str,
-        actor_id: UUID | None,
-        payload: dict[str, Any],
-        event_id: UUID | None = None,
-    ) -> None:
-        raise UnimplementedError("Audit ledger append", "REQ-06/REQ-14", "ledger")
-
-
-_ledger: LedgerWriter = UnimplementedLedger()
+_ledger: LedgerWriter = SqlLedgerWriter()
 
 
 def get_ledger() -> LedgerWriter:
