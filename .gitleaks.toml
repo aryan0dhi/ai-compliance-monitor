@@ -1,0 +1,5 @@
+title = "ai-compliance-monitor gitleaks config"
+
+# Custom rules for the chosen AI provider's keys can be added once it is picked.
+[extend]
+useDefault = true
