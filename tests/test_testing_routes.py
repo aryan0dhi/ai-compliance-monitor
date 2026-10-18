@@ -83,6 +83,13 @@ def test_clock_advance(api):
     assert client.get("/v1/test/clock").json()["offset_seconds"] == 900
 
 
+def test_clock_advance_accepts_integral_json_numbers(api):
+    # JSON Schema counts 60.0 as an integer (found by fuzzing against the pod interface).
+    client, clock, _ = api
+    assert client.post("/v1/test/clock/advance", json={"seconds": 60.0}).status_code == 200
+    assert clock.offset == 60
+
+
 @pytest.mark.parametrize("seconds", [-1, 1.5, "60", True, None, 10 * 366 * 24 * 3600 + 1])
 def test_clock_advance_rejects_invalid_seconds(api, seconds):
     client, clock, _ = api

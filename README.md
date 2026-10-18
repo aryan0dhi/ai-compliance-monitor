@@ -22,7 +22,9 @@ pod agreement ([docs/spec-decisions.md](docs/spec-decisions.md)).
 
 ## Stack
 
-Python 3.12, FastAPI, PostgreSQL 16, SQLAlchemy 2, Alembic, Docker Compose. Hosted on AWS Lightsail.
+Python 3.12, FastAPI, PostgreSQL 16, SQLAlchemy 2, Alembic, Docker Compose. Hosted on one Google Cloud
+Compute Engine VM (project AIREG) for cross-team testing: [docs/deployment-gcp.md](docs/deployment-gcp.md).
+The pod's common interface is specified in [docs/pod-interface/](docs/pod-interface/README.md) (OpenAPI 3.1).
 
 ## Quick start (Docker)
 

@@ -1,10 +1,10 @@
 """/v1/test/* routes (Section 5.1). Mounted only when settings.test_routes_enabled, so they
 return 404 in production. Admin keys only (D-13)."""
 
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field
 
 from app.core.types import UtcDatetime
 from app.db.uow import UnitOfWork, get_uow
@@ -22,9 +22,19 @@ _ERRORS: dict[int | str, dict[str, Any]] = {
 }
 
 
+def _json_integer(value: Any) -> Any:
+    """A JSON integer: 60 or 60.0 (JSON Schema counts both), never "60" or true (D-06)."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise ValueError("must be a JSON integer")
+    if isinstance(value, float):
+        if not value.is_integer():
+            raise ValueError("must be a whole number of seconds")
+        return int(value)
+    return value
+
+
 class ClockAdvanceIn(BaseModel):
-    # A JSON integer only: no numeric strings or booleans (as for metric values, D-06).
-    seconds: int = Field(strict=True, ge=0, le=MAX_ADVANCE_S)
+    seconds: Annotated[int, BeforeValidator(_json_integer)] = Field(ge=0, le=MAX_ADVANCE_S)
 
 
 class ClockOut(BaseModel):

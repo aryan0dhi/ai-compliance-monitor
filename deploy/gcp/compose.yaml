@@ -1,0 +1,82 @@
+# Cross-team test deployment on one Compute Engine VM (docs/deployment-gcp.md).
+#
+# Differences from the development docker-compose.yml: no source mounts or auto-reload, no dev
+# dependencies in the image, the database is never published, and only Caddy (HTTPS on 443,
+# redirect on 80) is reachable from outside. Settings come from deploy/gcp/.env on the VM, which
+# deploy.sh creates once with a random database password and is never committed.
+name: compliance
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: compliance
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/gcp/.env}
+      POSTGRES_DB: compliance
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U compliance -d compliance"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ../..
+      args:
+        INSTALL_DEV: "false"
+    image: compliance-monitor:latest
+    env_file: .env
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: compliance
+      POSTGRES_DB: compliance
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/healthz').status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  # Gap sweeps (REQ-02) and webhook delivery (REQ-04). A database lock keeps a second copy idle.
+  worker:
+    image: compliance-monitor:latest
+    command: ["python", "-m", "app.worker"]
+    env_file: .env
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: compliance
+      POSTGRES_DB: compliance
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Public entry point: automatic Let's Encrypt certificate for SITE_ADDRESS.
+  caddy:
+    image: caddy:2.8.4-alpine
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?set SITE_ADDRESS in deploy/gcp/.env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

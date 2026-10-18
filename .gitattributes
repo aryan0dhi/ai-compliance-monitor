@@ -1,0 +1,8 @@
+# Files that run inside Linux containers or VMs keep LF line endings on every checkout, including
+# Windows checkouts with core.autocrlf=true (a CRLF start-api.sh fails with "bad interpreter").
+*.sh        text eol=lf
+Dockerfile  text eol=lf
+Caddyfile   text eol=lf
+*.yaml      text eol=lf
+*.yml       text eol=lf
+alembic.ini text eol=lf
