@@ -56,6 +56,5 @@ class ThresholdVersion(Base):
     direction: Mapped[str]
     limit_value: Mapped[Decimal]
     valid_from: Mapped[datetime]
-    # Model 2: user FK (REQ-14). No FK yet because the users table belongs to the auth module;
-    # the auth owner adds the constraint in their migration. Null for seeded fixtures.
-    changed_by: Mapped[UUID | None]
+    # Model 2: user FK (REQ-14). Null for seeded fixtures.
+    changed_by: Mapped[UUID | None] = mapped_column(ForeignKey("app_user.id", ondelete="RESTRICT"))

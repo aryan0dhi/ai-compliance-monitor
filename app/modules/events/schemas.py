@@ -73,9 +73,17 @@ class EventDetail(BaseModel):
     # REQ-05 storage.
     retain_until: UtcDatetime
     evidence_bundle_hash: str | None
+    # REQ-02 monitoring gap (null for threshold_breach events): last data before the gap, first
+    # data after it, and the gap's length once closed (Ex-3).
+    gap_started_at: UtcDatetime | None = None
+    gap_ended_at: UtcDatetime | None = None
+    gap_duration_seconds: int | None = None
 
     @classmethod
     def from_event(cls, e: Event) -> "EventDetail":
+        duration = None
+        if e.gap_started_at is not None and e.gap_ended_at is not None:
+            duration = int((e.gap_ended_at - e.gap_started_at).total_seconds())
         return cls(
             event_id=e.id,
             system_id=e.system_id,
@@ -89,4 +97,7 @@ class EventDetail(BaseModel):
             threshold_version_id=e.threshold_version_id,
             retain_until=e.retain_until,
             evidence_bundle_hash=e.evidence_bundle_hash,
+            gap_started_at=e.gap_started_at,
+            gap_ended_at=e.gap_ended_at,
+            gap_duration_seconds=duration,
         )

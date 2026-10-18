@@ -78,19 +78,41 @@ class TestApiNames:
         assert {t.value for t in EventType} == {"threshold_breach", "monitoring_gap"}
 
     def test_event_state(self):
+        # Section 5 breach states, plus Model 1's gap path (D-12).
         assert {s.value for s in EventState} == {
             "FLAGGED",
             "UNDER_REVIEW",
             "DISPOSITIONED",
             "CLOSED",
+            "GAP_OPEN",
+            "REVIEWER_NOTIFIED",
+            "GAP_CLOSED",
         }
+
+    def test_breach_and_gap_states_are_disjoint(self):
+        # INV-12: a gap can never be in a review/disposition state.
+        from app.modules.events.models import BREACH_STATES, GAP_STATES
+
+        assert set(BREACH_STATES).isdisjoint(GAP_STATES)
+        assert set(BREACH_STATES) | set(GAP_STATES) == set(EventState)
 
 
 class TestSchemaShape:
     def test_registry_has_phase3_tables(self):
-        assert {"monitored_system", "metric_sample", "threshold_version", "event"} <= set(
-            Base.metadata.tables
-        )
+        assert {
+            "monitored_system",
+            "metric_sample",
+            "threshold_version",
+            "event",
+            "app_user",
+            "api_key",
+            "ledger_entry",
+            "webhook",
+            "notification",
+            "notification_delivery",
+            "simulated_clock",
+            "worker_heartbeat",
+        } <= set(Base.metadata.tables)
 
     def test_metric_sample_primary_key(self):
         pk = Base.metadata.tables["metric_sample"].primary_key

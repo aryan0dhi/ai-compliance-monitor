@@ -1,10 +1,11 @@
 """GET /v1/events and GET /v1/events/{event_id}. HTTP mapping only; logic in events.service."""
 
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.core.types import IsoAwareDatetime
+from app.core.types import INTEGER_QUERY, IsoAwareDatetime
 from app.db.uow import UnitOfWork, get_uow
 from app.modules.auth.interface import Principal, get_principal
 from app.modules.events.models import EventState, EventType
@@ -35,8 +36,8 @@ def list_events_route(
     state: EventState | None = None,
     event_type: EventType | None = Query(None, alias="type"),
     since: IsoAwareDatetime | None = Query(None, description="Only events detected at or after"),
-    limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
-    offset: int = Query(0, ge=0, le=MAX_OFFSET),
+    limit: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE), INTEGER_QUERY] = DEFAULT_PAGE_SIZE,
+    offset: Annotated[int, Query(ge=0, le=MAX_OFFSET), INTEGER_QUERY] = 0,
     principal: Principal = Depends(get_principal),
     uow: UnitOfWork = Depends(get_uow),
 ) -> EventPageOut:

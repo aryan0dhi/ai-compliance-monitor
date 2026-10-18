@@ -10,7 +10,9 @@ from app.db.models import Base
 
 config = context.config
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # Keep existing loggers: when migrations run in-process (integration tests), the default
+    # would silently disable every app.* logger, including the REQ-04/ledger alerts.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 

@@ -1,8 +1,5 @@
 # Local development stack. Production runs the same image on AWS Lightsail with a managed
-# PostgreSQL database (Phase 2, Q7.3).
-#
-# The background worker (gap sweeper, notification dispatcher, escalations) is owned by another
-# teammate and will be added here as a `worker` service using the same image.
+# PostgreSQL database (Phase 2, Q7.3): the api container plus one worker container.
 
 services:
   db:
@@ -47,6 +44,25 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # Background worker: monitoring-gap sweeps (REQ-02) and webhook delivery (REQ-04). Same image;
+  # starts after the api has applied migrations. A database lock keeps a second copy on standby.
+  worker:
+    build:
+      context: .
+      args:
+        INSTALL_DEV: "true"
+    command: ["python", "-m", "app.worker"]
+    env_file: .env
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+    volumes:
+      - ./app:/srv/app
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   pgdata:

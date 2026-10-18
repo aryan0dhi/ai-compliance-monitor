@@ -17,6 +17,12 @@ final, because cross-team tests depend on them.
 | D-08 | INV-8 (every read is logged) vs Section 5 (listing has no state change) | Open, **pod** + audit owner |
 | D-09 | Repeated breaches: one event per breaching sample vs one per episode | Open, **pod** |
 | D-10 | Timestamp plausibility (future/very old samples) | Open, **pod** |
+| D-11 | Gap boundary: "longer than" 3 intervals vs Ex-3 detecting at exactly 3 | Decided (team, follows Ex-3); **pod** to confirm |
+| D-12 | Monitoring-gap event states | Interim, **pod** (part of D-03) |
+| D-13 | Roles for endpoints Section 5 doesn't assign (webhooks, test routes) | Interim, **pod** |
+| D-14 | Ledger hash algorithm, and which reads are logged | Decided (team); **pod** to confirm for re-verification |
+| D-15 | Webhook delivery semantics (fan-out, retries, signature, SSRF rules) | Interim, **pod** |
+| D-16 | Test environment: shared clock, reset scope, fixtures | Interim, **pod** (with D-07) |
 
 ## Agenda for the next pod meeting
 
@@ -33,6 +39,9 @@ Ordered by impact on cross-team testing:
 6. **D-03**: state names before Phase 4 (`DISPOSITIONED` vs `CLASSIFIED`, etc.).
 7. **D-08**: whether listing events writes ledger entries.
 8. **D-05** and **D-10**: needed before Phase 5 retention and evidence hashing.
+9. **D-11** to **D-16**: added with gap detection, notifications, auth, the ledger and the test
+   routes (Phase 3). D-13 and D-16 matter first, because the other team's harness needs keys,
+   fixtures and the test clock.
 
 ## D-01: Threshold direction (REQ-03, AC-03)
 
@@ -73,7 +82,7 @@ the API. The primary key becomes `(system_id, metric_name, sampled_at)`.
 | Disposition tier | `CRITICAL_INFRASTRUCTURE_OR_WIDESPREAD` | `CRIT_INFRA` |
 
 **Interim decision.** The database and API use the Section 5 names, because the cross-team harness
-checks those values. Phase 3 only creates `FLAGGED` events, so nothing past that is implemented yet.
+checks those values. Phase 3 creates `FLAGGED` breach events; gap events use their own states (D-12). Nothing past `FLAGGED` is implemented for breaches yet.
 
 **To agree with the pod before Phase 4.**
 - Whether `REPORT_READY` and `SUBMITTED` become API-visible states or remain internal.
@@ -149,7 +158,7 @@ reading of the contract, or least privilege, when the contract is silent.
 | `metric_type` differs from the configured threshold's | not specified | `400`, nothing stored. Silently mixing types could hide a breach |
 | Unknown fields in the body | not specified | Ignored |
 | Threshold used for a late sample | not specified | The version in force at the sample's `timestamp`, not at arrival |
-| Viewing an event (`GET /v1/events/{id}`) | adds a view to the audit log | Writes a `VIEW` ledger entry in the same transaction; if the ledger write fails, the request fails (`501` until the ledger exists) |
+| Viewing an event (`GET /v1/events/{id}`) | adds a view to the audit log | Writes a `VIEW` ledger entry in the same transaction; if the ledger write fails, the request fails |
 | Listing events | "State Change: None" | No ledger entries |
 | `deadline_utc`, `harm_fields`, `revision_history` | Event fields | Always `null` / `null` / `[]` until Phase 4 |
 
@@ -207,10 +216,90 @@ isn't affected.
 test clock in the test environment), and whether very old backfilled samples should be
 accepted.
 
+## D-11: Gap boundary (REQ-02, AC-02, Model 5 Ex-3)
+
+**Conflict.** REQ-02 says a gap is raised when data stops "for longer than" the timeout (3 missed
+intervals). Ex-3 detects the gap at exactly 10:15 after the last sample at 10:00, and AC-02 says
+withholding exactly 3 intervals must trigger.
+
+**Decision.** Inclusive: a gap exists when `now - last_seen_at >= gap_missed_intervals *
+sampling_interval_s`. Withholding 2 intervals never triggers. `gap_missed_intervals` is a
+per-system setting (default 3). Systems that have never sent a sample aren't monitored yet and
+can't be in a gap.
+
+## D-12: Monitoring-gap event states (REQ-02, Model 1, INV-12)
+
+**Gap.** Section 5 lists only breach states. Model 1 gives gaps their own path:
+`GAP_OPEN` → `REVIEWER_NOTIFIED` → `GAP_CLOSED`.
+
+**Interim decision.** Gap events use Model 1's gap states. The database pairs states with types
+(`ck_event_state_matches_type`), so a gap can never be `UNDER_REVIEW` or receive a disposition
+(INV-12). `REVIEWER_NOTIFIED` is set when a webhook first accepts the gap notification.
+`GAP_CLOSED` is set when a new sample arrives, with `gap_ended_at` = that sample's arrival time
+(Ex-3's duration). If data resumes before delivery, the gap goes straight to `GAP_CLOSED`. At most
+one open gap per system (`uq_event_one_open_gap_per_system`).
+
+## D-13: Roles for endpoints Section 5 doesn't assign (REQ-13)
+
+| Endpoint | Section 5 says | Interim rule |
+|---|---|---|
+| `GET /v1/events/{id}/audit`, `GET /v1/ledger/*` | "viewer can read events/audit/ledger" | `viewer`, `reviewer`, `admin`; system keys `403` |
+| `POST /v1/webhooks` | nothing | `admin` only: registering a URL that receives event data is a configuration change |
+| `/v1/test/*` | nothing | `admin` only, and only mounted in the test environment (`404` in production) |
+
+Keys are issued with `python -m app.cli create-user` (Section 5 has no account endpoint; see
+D-07). Only the sha256 of each key is stored.
+
+## D-14: Ledger hashing and logged reads (REQ-06, REQ-14, INV-7, INV-8)
+
+**Decision (team).** `entry_hash = sha256(canonical JSON of seq, entry_type, event_id, actor_id,
+at, payload, prev_hash)`, with sorted keys, no whitespace, ASCII escapes and `at` in UTC with
+microseconds. The first `prev_hash` is 64 zeros. Appends are serialized with a transaction
+advisory lock, and `seq` is gapless (assigned by the writer, not a sequence). The full rule is
+in `app/modules/ledger/chain.py`, reimplemented in `scripts/verify_ledger_export.py`.
+
+- Modifying, deleting or reordering any entry is detected. Removing entries from the *end* is
+  only detected against a previously recorded `head_seq`/`head_hash` (the verify response returns
+  both). Keeping the head outside the database is Phase 5.
+- Logged reads: `GET /v1/events/{id}` writes `VIEW`. Listing (D-08), the audit trail and ledger
+  export/verify are not logged; they show audit records rather than event records, and logging
+  them would grow the ledger on every verification pass.
+- `actor_id` has no FK to `app_user`, so an export verifies on its own.
+
+## D-15: Webhook delivery (REQ-04, Section 5.1)
+
+**Interim behaviour.**
+- An outbox row is written in the event's transaction with `deliver_by = detection +
+  NOTIFY_MAX_DELAY_S` (900 s). The worker fans it out to every active webhook subscribed to its
+  type at that moment. With no webhook registered it waits, and the missed deadline is logged as a
+  REQ-04 error.
+- At-least-once delivery, retried with backoff of 10 s doubling to 5 min, at most
+  `WEBHOOK_MAX_ATTEMPTS` (10). Each success writes a `NOTIFIED` ledger entry with
+  `within_max_delay`, so delivery timing is auditable via `/v1/events/{id}/audit`.
+- The body is JSON with `notification_id` for deduplication, and is signed with
+  `X-Signature-SHA256` (HMAC-SHA256 with the secret returned at registration, an addition to the
+  `{webhook_id}` response).
+- SSRF rules: http(s) only (https in production), no credentials in the URL, every resolved
+  address must be public, connections are pinned to the vetted address, no redirects, no proxies.
+  `WEBHOOK_ALLOW_PRIVATE_NETWORKS` relaxes the address rule outside production (local testing).
+- Malformed or disallowed URLs get `400`. A failed verification ping gets `422` (Section 5).
+
+## D-16: Test environment (Section 5.1 test routes, D-07)
+
+- **Clock.** Simulated time = real time + an offset that only grows. The offset is stored in the
+  database (`simulated_clock`) because the API and the worker are separate processes; each caches
+  it for up to 1 s. `advance` takes a JSON integer `0 ≤ seconds ≤ 10 years`. `GET /v1/test/clock`
+  (an addition) reads it.
+- **Reset.** Truncates events, metrics, thresholds, webhooks, notifications and the ledger,
+  clears `last_seen_at`, reseeds the baseline fixtures (app/modules/testing/fixtures.py) and sets
+  the clock offset back to 0. Accounts and API keys are kept, so testers' keys keep working.
+- **Fixtures.** Taken from the spec's examples (Section 5.2 system id, Model 5 loan-scorer and
+  resume-ranker, AC-03 drift > 0.30) until the pod agrees a shared format (D-07).
+
 ## Other notes
 
-- **Worker deployment.** Q7.1 left open whether the worker runs as a separate container or as an
-  in-process scheduler. Q7.3 describes separate API and worker containers built from one image.
-  The worker owner decides; docker-compose has a placeholder comment for it.
-- **Health endpoint.** Q7.3 specifies `/healthz` (database connectivity plus the worker heartbeat).
-  The heartbeat check will be added together with the worker.
+- **Worker deployment.** Separate container from the same image (`python -m app.worker`, Q7.3).
+  A session advisory lock keeps exactly one worker active; extra copies stand by.
+- **Health endpoint.** `/healthz` reports `database` and `worker` (`ok` / `stale` / `missing`,
+  from the heartbeat). Only an unreachable database returns `503`, because restarting the API
+  container can't fix a stopped worker.

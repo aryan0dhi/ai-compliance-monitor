@@ -21,7 +21,10 @@ jobs:
       cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
     env:
       COVERAGE_MIN: 80
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/app_test
+      # +psycopg: the app uses psycopg 3; a bare postgresql:// URL selects psycopg2 (not installed).
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/app_test
+      # Integration tests fail instead of silently skipping if the service database is missing.
+      REQUIRE_POSTGRES: "1"
     # Throwaway database for tests and the Alembic check. It starts even when the job skips.
     services:
       postgres:
@@ -286,15 +289,21 @@ jobs:
           path: ${{ runner.temp }}/codeql
           if-no-files-found: ignore
 
-      # Fails the job if CodeQL reported any finding.
+      # Fails the job if CodeQL reported any finding that isn't an accepted, reviewed one
+      # (rule + file, with the reason, in .github/codeql-accepted.tsv).
       - name: Check for findings
         if: steps.detect.outputs.run == 'true'
         env:
           SARIF_DIR: ${{ runner.temp }}/codeql
+          ACCEPTED: .github/codeql-accepted.tsv
         run: |
-          jq -r '.runs[].results[] | "\(.ruleId)  \(.locations[0].physicalLocation.artifactLocation.uri):\(.locations[0].physicalLocation.region.startLine)  \(.message.text)"' "$SARIF_DIR"/*.sarif
-          n=$(jq -s '[.[].runs[].results[]] | length' "$SARIF_DIR"/*.sarif)
-          echo "CodeQL findings: $n"
+          set -eu
+          jq -r '.runs[].results[] | [.ruleId, .locations[0].physicalLocation.artifactLocation.uri, (.locations[0].physicalLocation.region.startLine | tostring), .message.text] | @tsv' "$SARIF_DIR"/*.sarif > "$RUNNER_TEMP/findings.tsv"
+          awk -F'\t' 'NR == FNR { if ($0 !~ /^#/ && NF >= 3) ok[$1 FS $2] = 1; next } !(($1 FS $2) in ok)' "$ACCEPTED" "$RUNNER_TEMP/findings.tsv" > "$RUNNER_TEMP/new.tsv"
+          awk -F'\t' '{ print $1 "  " $2 ":" $3 "  " $4 }' "$RUNNER_TEMP/findings.tsv"
+          total=$(wc -l < "$RUNNER_TEMP/findings.tsv")
+          n=$(wc -l < "$RUNNER_TEMP/new.tsv")
+          echo "CodeQL findings: $total (not accepted: $n)"
           [ "$n" -eq 0 ]
 
   actionlint:

@@ -1,8 +1,8 @@
 """event: flagged threshold breaches and monitoring gaps (REQ-03 creation, REQ-05 storage).
 
-This table is shared. Phase 3 (this module) only creates FLAGGED threshold_breach events. Other
-modules extend it: the gap sweeper creates monitoring_gap events (REQ-02) and may add gap columns;
-review, disposition, Art. 3(49) fields, escalations, reports and ledger entries live in their own
+This table is shared. This module creates FLAGGED threshold_breach events; the gap sweeper
+(app.modules.monitoring_gaps) creates monitoring_gap events (REQ-02) using the gap columns.
+Review, disposition, Art. 3(49) fields, escalations, reports and ledger entries live in their own
 tables that reference event.id (Model 2).
 """
 
@@ -12,7 +12,14 @@ from decimal import Decimal
 from enum import StrEnum
 from uuid import UUID, uuid4
 
-from sqlalchemy import CheckConstraint, ForeignKey, ForeignKeyConstraint, Index, UniqueConstraint
+from sqlalchemy import (
+    CheckConstraint,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, check_in
@@ -29,12 +36,34 @@ class EventType(StrEnum):
 
 
 class EventState(StrEnum):
-    """Section 5.2 Event.state. Model 1 uses different names (D-03); interim until pod agrees."""
+    """Section 5.2 Event.state. Model 1 uses different names (D-03); interim until pod agrees.
+
+    Breach events use the Section 5 states. Section 5 has none for monitoring gaps, so gap events
+    use Model 1's separate gap path (D-12), which can never reach review or disposition (INV-12).
+    """
 
     FLAGGED = "FLAGGED"
     UNDER_REVIEW = "UNDER_REVIEW"
     DISPOSITIONED = "DISPOSITIONED"
     CLOSED = "CLOSED"
+    GAP_OPEN = "GAP_OPEN"
+    REVIEWER_NOTIFIED = "REVIEWER_NOTIFIED"
+    GAP_CLOSED = "GAP_CLOSED"
+
+
+BREACH_STATES = (
+    EventState.FLAGGED,
+    EventState.UNDER_REVIEW,
+    EventState.DISPOSITIONED,
+    EventState.CLOSED,
+)
+GAP_STATES = (EventState.GAP_OPEN, EventState.REVIEWER_NOTIFIED, EventState.GAP_CLOSED)
+# A gap is open until data resumes.
+OPEN_GAP_STATES = (EventState.GAP_OPEN, EventState.REVIEWER_NOTIFIED)
+
+
+def _sql_in(values: tuple[EventState, ...]) -> str:
+    return "(" + ", ".join(f"'{v}'" for v in values) + ")"
 
 
 def retain_until_for(detected_at: datetime) -> datetime:
@@ -75,6 +104,24 @@ class Event(Base):
             + ")",
             name="breach_fields_present",
         ),
+        # INV-12: each event type has its own states, so a gap can never enter review.
+        CheckConstraint(
+            f"(type = '{EventType.THRESHOLD_BREACH}' AND state IN {_sql_in(BREACH_STATES)}) OR "
+            f"(type = '{EventType.MONITORING_GAP}' AND state IN {_sql_in(GAP_STATES)})",
+            name="state_matches_type",
+        ),
+        # REQ-02 / Ex-3: a gap records when data stopped, and when it resumed once closed.
+        CheckConstraint(
+            f"type <> '{EventType.MONITORING_GAP}' OR (gap_started_at IS NOT NULL AND "
+            f"(gap_ended_at IS NOT NULL) = (state = '{EventState.GAP_CLOSED}'))",
+            name="gap_fields_present",
+        ),
+        CheckConstraint(
+            f"type <> '{EventType.THRESHOLD_BREACH}' OR "
+            "(gap_started_at IS NULL AND gap_ended_at IS NULL)",
+            name="breach_has_no_gap_fields",
+        ),
+        CheckConstraint("gap_ended_at >= gap_started_at", name="gap_ends_after_start"),
         # REQ-05 / INV-10: the stored retention date can never be shorter than six months.
         # Month arithmetic is done in UTC explicitly; plain `timestamptz + interval` would use the
         # session time zone and could disagree with retain_until_for() near month ends.
@@ -107,6 +154,15 @@ class Event(Base):
         Index("ix_event_system_id_detected_at", "system_id", "detected_at"),
         Index("ix_event_state", "state"),
         Index("ix_event_type", "type"),
+        # REQ-02: at most one open gap per system, even with concurrent sweepers.
+        Index(
+            "uq_event_one_open_gap_per_system",
+            "system_id",
+            unique=True,
+            postgresql_where=text(
+                f"type = '{EventType.MONITORING_GAP}' AND state IN {_sql_in(OPEN_GAP_STATES)}"
+            ),
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
@@ -132,3 +188,8 @@ class Event(Base):
     retain_until: Mapped[datetime]
     # REQ-05: sha256 of the evidence bundle. Nullable until the bundle window is agreed (D-05).
     evidence_bundle_hash: Mapped[str | None]
+
+    # Monitoring-gap fields (null for threshold_breach events). gap_started_at is the system's
+    # last_seen_at when the gap was detected; gap_ended_at is when the first new sample arrived.
+    gap_started_at: Mapped[datetime | None]
+    gap_ended_at: Mapped[datetime | None]

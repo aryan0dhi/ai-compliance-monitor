@@ -1,0 +1,818 @@
+openapi: 3.1.0
+info:
+  title: Post-market monitoring service - pod cross-team testing interface
+  version: 1.0.0-draft
+  summary: The network boundary every team's implementation exposes for automated cross-team tests.
+  description: |
+    Common web-service interface for the pod's implementations of the post-market monitoring
+    specification (EU AI Act Art. 72-73; Phase 2 REQ-01..REQ-16). An independently written test
+    uses only this interface: it pushes inputs, controls time, and observes outputs, without
+    knowing anything about a team's internal architecture.
+
+    * Normative behaviour that a schema can't express (timing, idempotency, ordering, the
+      ledger hash rule, the standard fixtures) is in `README.md` next to this file. Rules there
+      are referenced as **B-xx**.
+    * Each operation has `x-phase`: the phase from which every implementation MUST provide it.
+      Phase 3 = monitoring, notification, audit; Phase 4 = review and disposition; Phase 5 =
+      reports. Before its phase, an operation MAY return `404` or `501`.
+    * `x-reqs` lists the requirements an operation makes observable.
+    * Descriptions starting with **Proposed** add to the Phase 2 Section 5 contract and need pod
+      agreement; everything else restates Section 5.
+    * Time values are RFC 3339 date-times **with an offset**; responses use UTC. Identifiers are
+      UUIDs. Bodies are JSON (`application/json`). Unknown request fields are ignored.
+servers:
+  - url: "{baseUrl}"
+    description: A team's deployment, listed in the pod registry (README.md, "Registry entry").
+    variables:
+      baseUrl:
+        default: https://example.invalid
+security:
+  - apiKey: []
+tags:
+  - name: discovery
+  - name: metrics
+  - name: events
+  - name: review
+    description: Phase 4.
+  - name: reports
+    description: Phase 5.
+  - name: audit
+  - name: notifications
+  - name: test
+    description: Test deployments only; MUST be absent (404) in production.
+
+paths:
+  /v1/meta:
+    get:
+      tags: [discovery]
+      operationId: getMeta
+      summary: Interface version and implemented phases
+      description: |
+        **Proposed.** Lets a harness decide which checks apply without trial and error.
+        No authentication.
+      x-phase: 3
+      security: []
+      responses:
+        "200":
+          description: Service description
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Meta" }
+
+  /v1/me:
+    get:
+      tags: [discovery]
+      operationId: getMe
+      summary: The identity behind the presented key
+      description: |
+        **Proposed.** Returns the `actor_id` that audit entries record for this key, so a test can
+        check that its own reads and changes are attributed to it (AC-15).
+      x-phase: 3
+      x-reqs: [REQ-13, REQ-14]
+      responses:
+        "200":
+          description: Caller identity
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Me" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/metrics:
+    post:
+      tags: [metrics]
+      operationId: submitMetric
+      summary: Ingest one performance or drift sample
+      description: |
+        Requires a monitored-system key whose system matches `system_id`. A sample whose value
+        breaches the threshold in force at its `timestamp` creates a `FLAGGED` event (B-03);
+        any accepted new sample also resets the system's gap timer (B-02).
+
+        Repeating a sample with the same `(system_id, metric_name, timestamp)`: identical value
+        and type return `200` with the stored sample and nothing new is created; a different value
+        or type returns `409` (**Proposed**, D-04).
+      x-phase: 3
+      x-reqs: [REQ-01, REQ-03]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MetricSampleIn" }
+      responses:
+        "201":
+          description: Stored. `flagged_event_id` is present exactly when an event was created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MetricSampleOut" }
+        "200":
+          description: Identical repeat of a stored sample (Proposed, D-04)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MetricSampleOut" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/events:
+    get:
+      tags: [events]
+      operationId: listEvents
+      summary: List flagged and monitoring-gap events, newest first
+      description: |
+        Readable by viewer, reviewer and admin keys. Ordered by `detected_at` descending, ties
+        broken by `event_id` descending, so pages are stable. **Proposed** (D-06): the page
+        envelope and `limit`/`offset` parameters.
+      x-phase: 3
+      x-reqs: [REQ-02, REQ-03]
+      parameters:
+        - { name: system_id, in: query, schema: { type: string, format: uuid } }
+        - { name: state, in: query, schema: { $ref: "#/components/schemas/EventState" } }
+        - { name: type, in: query, schema: { $ref: "#/components/schemas/EventType" } }
+        - name: since
+          in: query
+          description: Only events with `detected_at` at or after this time.
+          schema: { type: string, format: date-time }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, maximum: 9223372036854775807, default: 0 } }
+      responses:
+        "200":
+          description: One page
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EventPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /v1/events/{event_id}:
+    parameters:
+      - $ref: "#/components/parameters/EventId"
+    get:
+      tags: [events]
+      operationId: getEvent
+      summary: One event, with its review state
+      description: |
+        Every successful call adds one audit entry for the caller (B-14). An id that names no
+        event, including a malformed one, is `404`.
+      x-phase: 3
+      x-reqs: [REQ-03, REQ-07, REQ-09, REQ-10, REQ-14, REQ-15]
+      responses:
+        "200":
+          description: The event
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Event" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/events/{event_id}/audit:
+    parameters:
+      - $ref: "#/components/parameters/EventId"
+    get:
+      tags: [audit]
+      operationId: getEventAudit
+      summary: Who read or changed the event, and when
+      x-phase: 3
+      x-reqs: [REQ-14]
+      responses:
+        "200":
+          description: Entries in the order they were recorded
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AuditEntry" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/events/{event_id}/disposition:
+    parameters:
+      - $ref: "#/components/parameters/EventId"
+    post:
+      tags: [review]
+      operationId: recordDisposition
+      summary: Confirm the Art. 3(49) fields and assign or revise the severity tier
+      description: |
+        Reviewer keys only. All four harm fields must be `CONFIRMED` or `NOT_APPLICABLE`
+        (from this request or earlier ones) or the call is `409`. `NOT_SERIOUS` requires a
+        non-empty `rationale` and closes the event without a deadline. A repeat call appends a
+        revision (REQ-09). Deadline rules are B-10. Monitoring-gap events are `409` (INV-12).
+      x-phase: 4
+      x-reqs: [REQ-07, REQ-08a, REQ-08b, REQ-09, REQ-10, REQ-13]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DispositionIn" }
+      responses:
+        "200":
+          description: Updated event; `deadline_utc` is set for the three serious tiers
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Event" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/events/{event_id}/report:
+    parameters:
+      - $ref: "#/components/parameters/EventId"
+    get:
+      tags: [reports]
+      operationId: getReport
+      summary: Submission-ready Article 73 report
+      description: |
+        Reviewer keys only (REQ-13). `409` while the event has no serious-tier disposition
+        (REQ-08a); the same bytes are returned on every call once assembled (B-12).
+      x-phase: 5
+      x-reqs: [REQ-08a, REQ-12, REQ-13]
+      responses:
+        "200":
+          description: The report
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Report" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/events/{event_id}/report/submission:
+    parameters:
+      - $ref: "#/components/parameters/EventId"
+    post:
+      tags: [reports]
+      operationId: markReportSubmitted
+      summary: Record that the reviewer submitted the report to the authority
+      description: |
+        **Proposed** (Phase 2 Section 6.3 "allow reviewers to mark a report as submitted").
+        Reviewer keys only. Submission itself happens outside the system.
+      x-phase: 5
+      x-reqs: [REQ-12, REQ-13]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note: { type: string, maxLength: 2000 }
+      responses:
+        "200":
+          description: The report with `submitted_at` set
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Report" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/ledger/export:
+    get:
+      tags: [audit]
+      operationId: exportLedger
+      summary: Raw tamper-evident ledger entries, for independent re-verification
+      description: |
+        Pages through every entry in chain order. The entries MUST verify under the pod hash
+        rule (B-06) so another team can check them with their own code.
+      x-phase: 3
+      x-reqs: [REQ-06]
+      parameters:
+        - { name: after_seq, in: query, schema: { type: integer, minimum: 0, maximum: 9223372036854775807, default: 0 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 10000, default: 1000 } }
+      responses:
+        "200":
+          description: One page of the chain
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LedgerExport" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /v1/ledger/verify:
+    get:
+      tags: [audit]
+      operationId: verifyLedger
+      summary: Re-walk the whole chain on the server
+      x-phase: 3
+      x-reqs: [REQ-06]
+      responses:
+        "200":
+          description: Verification result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LedgerVerify" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /v1/webhooks:
+    post:
+      tags: [notifications]
+      operationId: registerWebhook
+      summary: Register a URL that receives reviewer notifications and reminders
+      description: |
+        Admin keys (**Proposed**, D-13). Before saving, the service POSTs a verification body to
+        the URL; anything other than `2xx` is `422`. Implementations MAY refuse URLs that resolve
+        to non-public addresses (`422`) and MUST accept public `https` URLs. Deliveries are
+        described under `webhooks` below.
+      x-phase: 3
+      x-reqs: [REQ-04, REQ-11]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookIn" }
+      responses:
+        "201":
+          description: Registered
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebhookOut" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422":
+          description: The URL is refused or didn't answer the verification POST with 2xx
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /v1/test/reset:
+    post:
+      tags: [test]
+      operationId: resetTestState
+      summary: Return to the standard fixtures with an empty history
+      description: |
+        Test deployments only, admin keys. Deletes every event, sample, notification, webhook,
+        disposition, report and ledger entry; loads the standard fixtures (B-20); resets the
+        simulated clock to real time. API keys stay valid.
+      x-phase: 3
+      responses:
+        "204": { description: Reset complete }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: Not a test deployment }
+
+  /v1/test/clock/advance:
+    post:
+      tags: [test]
+      operationId: advanceClock
+      summary: Move the service's clock forward
+      description: |
+        Test deployments only, admin keys. Every time-dependent behaviour (gap detection,
+        notification deadlines, Article 73 deadlines, reminders, retention) follows this clock.
+        Effects that become due MUST be observable within the settle time (B-21).
+      x-phase: 3
+      x-reqs: [REQ-02, REQ-05, REQ-10, REQ-11]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ClockAdvanceIn" }
+      responses:
+        "200":
+          description: New simulated time
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Clock" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: Not a test deployment }
+
+  /v1/test/clock:
+    get:
+      tags: [test]
+      operationId: readClock
+      summary: Current simulated time
+      description: "**Proposed.** Test deployments only, admin keys."
+      x-phase: 3
+      responses:
+        "200":
+          description: Current simulated time
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Clock" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: Not a test deployment }
+
+webhooks:
+  notification:
+    post:
+      summary: Delivery to a registered URL (the service is the client)
+      description: |
+        Sent for every new flagged event and monitoring gap (`flag_notification`, REQ-04/REQ-02)
+        and for each Article 73 reminder (`reminder`, REQ-11) to every webhook subscribed to
+        that type. At least once: receivers deduplicate on `notification_id`. A `2xx` response
+        acknowledges it; anything else is retried. Delivery deadlines are B-04 and B-11.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookDelivery" }
+      responses:
+        "200": { description: Acknowledged (any 2xx) }
+
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+      description: |
+        `Authorization: Bearer <api_key>`. Each key belongs to one role (B-13): `system` (one
+        monitored system; metric submission only), `viewer`, `reviewer`, `admin`. Missing,
+        unknown or revoked keys are `401`; a valid key with the wrong role is `403`.
+        Authentication is checked before the request body, so an unauthenticated malformed
+        request is `401`. Keys for testers are issued out of band (README.md, "Registry entry").
+
+  parameters:
+    EventId:
+      name: event_id
+      in: path
+      required: true
+      schema: { type: string }
+      description: Event UUID. Ids that name no event, malformed ones included, are `404`.
+
+  responses:
+    BadRequest:
+      description: Malformed JSON, schema violation or invalid parameter (never 422 for these)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: Missing, unknown or revoked API key
+      headers:
+        WWW-Authenticate: { schema: { type: string, const: Bearer } }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Forbidden:
+      description: The key's role (or system scope) doesn't allow this operation
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: No such event
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Conflict:
+      description: The request conflicts with the record's current state
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      required: [detail]
+      properties:
+        detail:
+          description: Human-readable message, or a list of field errors. Never echoes raw input.
+          oneOf:
+            - type: string
+            - type: array
+              items: { type: object }
+
+    Meta:
+      type: object
+      required: [interface_version, phases, test_routes]
+      properties:
+        interface_version: { type: string, examples: ["1.0.0-draft"] }
+        phases:
+          type: array
+          items: { type: integer, enum: [3, 4, 5] }
+          description: Phases whose operations this deployment provides.
+        test_routes: { type: boolean, description: "Whether /v1/test/* are available." }
+        team: { type: string }
+
+    Me:
+      type: object
+      required: [actor_id, role]
+      properties:
+        actor_id: { type: string, format: uuid }
+        role: { $ref: "#/components/schemas/Role" }
+        system_id: { type: [string, "null"], format: uuid }
+
+    Role:
+      type: string
+      enum: [system, viewer, reviewer, admin]
+
+    MetricType:
+      type: string
+      enum: [performance, drift]
+
+    MetricSampleIn:
+      type: object
+      required: [system_id, metric_name, metric_type, value, timestamp]
+      properties:
+        system_id: { type: string, format: uuid }
+        metric_name:
+          type: string
+          minLength: 1
+          maxLength: 255
+          pattern: "^[^\\s\\x00-\\x1f\\x7f-\\x9f](?:[^\\x00-\\x1f\\x7f-\\x9f]*[^\\s\\x00-\\x1f\\x7f-\\x9f])?$"
+          description: No leading/trailing whitespace or control characters.
+        metric_type: { $ref: "#/components/schemas/MetricType" }
+        value:
+          type: number
+          description: A JSON number (strings, booleans, NaN and infinities are 400). Compared exactly.
+        timestamp:
+          type: string
+          format: date-time
+          description: When the measurement was taken; must include an offset.
+
+    MetricSampleOut:
+      allOf:
+        - $ref: "#/components/schemas/MetricSampleIn"
+        - type: object
+          properties:
+            flagged_event_id: { type: string, format: uuid }
+
+    EventType:
+      type: string
+      enum: [threshold_breach, monitoring_gap]
+
+    EventState:
+      type: string
+      description: |
+        Breach events: `FLAGGED` → `UNDER_REVIEW` → `DISPOSITIONED` (serious tier) or `CLOSED`
+        (not serious). Gap events (**Proposed**, D-12): `GAP_OPEN` → `REVIEWER_NOTIFIED` →
+        `GAP_CLOSED`; a gap never takes a breach state (INV-12).
+      enum: [FLAGGED, UNDER_REVIEW, DISPOSITIONED, CLOSED, GAP_OPEN, REVIEWER_NOTIFIED, GAP_CLOSED]
+
+    EventSummary:
+      type: object
+      required: [event_id, system_id, type, state, detected_at]
+      properties:
+        event_id: { type: string, format: uuid }
+        system_id: { type: string, format: uuid }
+        type: { $ref: "#/components/schemas/EventType" }
+        state: { $ref: "#/components/schemas/EventState" }
+        detected_at: { type: string, format: date-time }
+        metric_name: { type: [string, "null"] }
+
+    EventPage:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/EventSummary" }
+        total: { type: integer, minimum: 0 }
+        limit: { type: integer }
+        offset: { type: integer }
+
+    HarmFieldName:
+      type: string
+      description: The four Art. 3(49) consequences (REQ-07).
+      enum: [health_safety, critical_infrastructure, fundamental_rights, property_environment]
+
+    HarmField:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [PENDING, CONFIRMED, NOT_APPLICABLE]
+        prefill_evidence:
+          type: [string, "null"]
+          description: Evidence drawn from the event record, or null when none is available (never guessed).
+        confirmed_by: { type: [string, "null"], format: uuid }
+        confirmed_at: { type: [string, "null"], format: date-time }
+
+    HarmFields:
+      type: object
+      required: [health_safety, critical_infrastructure, fundamental_rights, property_environment]
+      properties:
+        health_safety: { $ref: "#/components/schemas/HarmField" }
+        critical_infrastructure: { $ref: "#/components/schemas/HarmField" }
+        fundamental_rights: { $ref: "#/components/schemas/HarmField" }
+        property_environment: { $ref: "#/components/schemas/HarmField" }
+
+    DispositionTier:
+      type: string
+      description: |
+        Article 73 tiers with their deadlines: `DEATH` 10 days, `CRITICAL_INFRASTRUCTURE_OR_WIDESPREAD`
+        2 days, `OTHER_SERIOUS` 15 days; `NOT_SERIOUS` closes without a deadline (REQ-08b).
+      enum: [DEATH, CRITICAL_INFRASTRUCTURE_OR_WIDESPREAD, OTHER_SERIOUS, NOT_SERIOUS]
+
+    Revision:
+      type: object
+      required: [tier, reviewer_id, recorded_at]
+      properties:
+        tier: { $ref: "#/components/schemas/DispositionTier" }
+        previous_tier:
+          oneOf:
+            - $ref: "#/components/schemas/DispositionTier"
+            - type: "null"
+        reviewer_id: { type: string, format: uuid }
+        recorded_at: { type: string, format: date-time }
+        rationale: { type: [string, "null"] }
+        deadline_utc: { type: [string, "null"], format: date-time }
+
+    Event:
+      allOf:
+        - $ref: "#/components/schemas/EventSummary"
+        - type: object
+          required: [deadline_utc, harm_fields, revision_history]
+          properties:
+            metric_timestamp: { type: [string, "null"], format: date-time }
+            observed_value: { type: [number, "null"] }
+            threshold_value: { type: [number, "null"] }
+            retain_until:
+              type: string
+              format: date-time
+              description: At least six months after `detected_at` (REQ-05, INV-10).
+            deadline_utc:
+              type: [string, "null"]
+              format: date-time
+              description: Article 73 deadline once a serious tier is assigned (B-10).
+            harm_fields:
+              description: Null before Phase 4 and for monitoring gaps.
+              oneOf:
+                - $ref: "#/components/schemas/HarmFields"
+                - type: "null"
+            revision_history:
+              type: array
+              items: { $ref: "#/components/schemas/Revision" }
+            gap_started_at: { type: [string, "null"], format: date-time }
+            gap_ended_at: { type: [string, "null"], format: date-time }
+            gap_duration_seconds: { type: [integer, "null"], minimum: 0 }
+
+    DispositionIn:
+      type: object
+      required: [tier]
+      properties:
+        tier: { $ref: "#/components/schemas/DispositionTier" }
+        rationale:
+          type: [string, "null"]
+          maxLength: 4000
+          description: Required (non-empty) for NOT_SERIOUS and for any revision to a less strict tier.
+        harm_fields:
+          type: object
+          description: Confirmation of any of the four fields; all four must end up confirmed or N/A.
+          properties:
+            health_safety: { $ref: "#/components/schemas/HarmFieldConfirmation" }
+            critical_infrastructure: { $ref: "#/components/schemas/HarmFieldConfirmation" }
+            fundamental_rights: { $ref: "#/components/schemas/HarmFieldConfirmation" }
+            property_environment: { $ref: "#/components/schemas/HarmFieldConfirmation" }
+      allOf:
+        - if:
+            properties: { tier: { const: NOT_SERIOUS } }
+          then:
+            required: [rationale]
+            properties: { rationale: { type: string, minLength: 1 } }
+
+    HarmFieldConfirmation:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [CONFIRMED, NOT_APPLICABLE] }
+        evidence: { type: [string, "null"], maxLength: 4000 }
+
+    Report:
+      type: object
+      required: [event, harm_fields, determination, detected_at, determination_at, assembled_at, deadline_utc]
+      properties:
+        event: { $ref: "#/components/schemas/Event" }
+        harm_fields: { $ref: "#/components/schemas/HarmFields" }
+        determination:
+          type: object
+          required: [tier, reviewer_id]
+          properties:
+            tier: { $ref: "#/components/schemas/DispositionTier" }
+            reviewer_id: { type: string, format: uuid }
+            rationale: { type: [string, "null"] }
+        detected_at: { type: string, format: date-time }
+        determination_at: { type: string, format: date-time }
+        assembled_at: { type: string, format: date-time }
+        deadline_utc: { type: string, format: date-time }
+        report_sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
+        submitted_at: { type: [string, "null"], format: date-time }
+
+    AuditEntry:
+      type: object
+      required: [actor_id, action, timestamp]
+      properties:
+        actor_id:
+          type: [string, "null"]
+          format: uuid
+          description: The caller's `actor_id` (see `/v1/me`); null for the service's own background actions.
+        action:
+          type: string
+          description: "`VIEW` for reads (B-14). Other values are implementation-defined."
+        timestamp: { type: string, format: date-time }
+        seq: { type: integer, description: Position in the ledger, when the entry is chained. }
+
+    LedgerEntry:
+      type: object
+      required: [seq, entry_type, event_id, actor_id, at, payload, prev_hash, entry_hash]
+      properties:
+        seq: { type: integer, minimum: 1 }
+        entry_type: { type: string }
+        event_id: { type: [string, "null"], format: uuid }
+        actor_id: { type: [string, "null"], format: uuid }
+        at:
+          type: string
+          description: The exact string that was hashed (UTC, microseconds, "+00:00"; B-06).
+        payload: { type: object }
+        prev_hash: { type: string, pattern: "^[0-9a-f]{64}$" }
+        entry_hash: { type: string, pattern: "^[0-9a-f]{64}$" }
+
+    LedgerExport:
+      type: object
+      required: [entries, next_after_seq]
+      properties:
+        hash_algorithm: { type: string }
+        entries:
+          type: array
+          items: { $ref: "#/components/schemas/LedgerEntry" }
+        next_after_seq:
+          type: [integer, "null"]
+          description: Pass as `after_seq` for the next page; null at the end of the chain.
+
+    LedgerVerify:
+      type: object
+      required: [valid, entries_checked, first_mismatch]
+      properties:
+        valid: { type: boolean }
+        entries_checked: { type: integer, minimum: 0 }
+        first_mismatch: { type: [integer, "null"], description: seq of the first entry that fails. }
+        head_seq: { type: integer, minimum: 0 }
+        head_hash: { type: string, pattern: "^[0-9a-f]{64}$" }
+
+    NotificationType:
+      type: string
+      enum: [flag_notification, reminder]
+
+    WebhookIn:
+      type: object
+      required: [url, event_types]
+      properties:
+        url:
+          type: string
+          maxLength: 2048
+          pattern: "^https?://[A-Za-z0-9.-]+(?::(?:6553[0-5]|655[0-2][0-9]|65[0-4][0-9]{2}|6[0-4][0-9]{3}|[1-5][0-9]{4}|[0-9]{1,4}))?(?:/[\\x21-\\x7e]*)?$"
+        event_types:
+          type: array
+          minItems: 1
+          maxItems: 2
+          items: { $ref: "#/components/schemas/NotificationType" }
+
+    WebhookOut:
+      type: object
+      required: [webhook_id]
+      properties:
+        webhook_id: { type: string, format: uuid }
+        secret:
+          type: string
+          description: |
+            **Proposed.** If returned, deliveries carry `X-Signature-SHA256: sha256=<hex HMAC-SHA256
+            of the raw body with this secret>`.
+
+    WebhookDelivery:
+      type: object
+      required: [notification_id, notification_type, event_id, created_at, event]
+      properties:
+        notification_id: { type: string, format: uuid, description: Deduplication key. }
+        notification_type: { $ref: "#/components/schemas/NotificationType" }
+        event_id: { type: string, format: uuid }
+        created_at: { type: string, format: date-time, description: Detection time (service clock). }
+        deliver_by: { type: string, format: date-time }
+        event:
+          type: object
+          required: [event_id, type, system_id, detected_at]
+          description: Snapshot of the event; other fields are implementation-defined.
+          properties:
+            event_id: { type: string, format: uuid }
+            type: { $ref: "#/components/schemas/EventType" }
+            system_id: { type: string, format: uuid }
+            detected_at: { type: string, format: date-time }
+        reminder:
+          type: object
+          description: Present for `reminder` deliveries (Phase 4).
+          required: [elapsed_percent, deadline_utc]
+          properties:
+            elapsed_percent: { type: integer, enum: [50, 80, 100] }
+            deadline_utc: { type: string, format: date-time }
+
+    ClockAdvanceIn:
+      type: object
+      required: [seconds]
+      properties:
+        seconds: { type: integer, minimum: 0, maximum: 316224000 }
+
+    Clock:
+      type: object
+      required: [simulated_time]
+      properties:
+        simulated_time: { type: string, format: date-time }
+        offset_seconds: { type: integer, minimum: 0 }

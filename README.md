@@ -13,13 +13,18 @@ The Phase 2 specification is the source of truth for requirements (REQ-xx), acce
 [HANDOFF.md](HANDOFF.md).** It covers the interfaces to implement, reusable functions,
 compatibility rules, testing patterns, open decisions and unverified security checks.
 
-**Status:** all 226 tests pass in docker compose, including 52 against real PostgreSQL
-(2026-10-17). Several contract details still await pod agreement; see
-[HANDOFF.md §10](HANDOFF.md#10-backlog-for-this-area).
+**Status (2026-10-18):** Phase 3 scope is implemented: REQ-01, 02, 03, 04, 06, 14, the storage
+part of REQ-05 and the Phase 3 role checks of REQ-13, plus the `/v1/test/*` routes and the
+background worker. 503 tests pass against PostgreSQL 16 (95.7% line coverage), and the black-box
+contract suite passes 27/27 against a live API + worker. **Cross-team testing:** see
+[docs/cross-team-testing.md](docs/cross-team-testing.md). Several contract details still await
+pod agreement ([docs/spec-decisions.md](docs/spec-decisions.md)).
 
 ## Stack
 
-Python 3.12, FastAPI, PostgreSQL 16, SQLAlchemy 2, Alembic, Docker Compose. Hosted on AWS Lightsail.
+Python 3.12, FastAPI, PostgreSQL 16, SQLAlchemy 2, Alembic, Docker Compose. Hosted on one Google Cloud
+Compute Engine VM (project AIREG) for cross-team testing: [docs/deployment-gcp.md](docs/deployment-gcp.md).
+The pod's common interface is specified in [docs/pod-interface/](docs/pod-interface/README.md) (OpenAPI 3.1).
 
 ## Quick start (Docker)
 
@@ -30,16 +35,32 @@ curl http://localhost:8000/healthz
 ```
 
 On startup, the API container runs `alembic upgrade head` and then serves on port 8000 with
-auto-reload, with `app/`, `alembic/` and `tests/` mounted from your checkout.
+auto-reload, with `app/`, `alembic/` and `tests/` mounted from your checkout. The `worker`
+container (same image, `python -m app.worker`) starts once the API is healthy and runs gap sweeps
+and webhook delivery every `WORKER_POLL_INTERVAL_S`.
 
 - API docs: http://localhost:8000/docs
-- Health: `GET /healthz` returns `200 {"status":"ok","database":"ok"}`, or `503` when the database
-  is unreachable.
+- Health: `GET /healthz` returns `200 {"status":"ok","database":"ok","worker":"ok"}` (`worker` is
+  `stale` or `missing` if its heartbeat stops), or `503` when the database is unreachable.
+
+### API keys
+
+Every `/v1` call needs `Authorization: Bearer <api_key>`. Section 5 has no account endpoints, so
+keys are issued with the admin CLI (printed once; only a hash is stored):
+
+```bash
+docker compose exec api python -m app.cli create-system --name loan-scorer --id 550e8400-e29b-41d4-a716-446655440000
+docker compose exec api python -m app.cli create-user --name loan-scorer-key --role system --system-id 550e8400-e29b-41d4-a716-446655440000
+docker compose exec api python -m app.cli create-user --name alice --role viewer   # or reviewer / admin
+docker compose exec api python -m app.cli add-threshold --system-id <id> --metric drift_score --type drift --direction above --limit 0.30
+docker compose exec api python -m app.cli revoke-key --key-id <key_id>
+docker compose exec api python -m app.cli verify-ledger                             # exit 1 if tampered
+```
 
 Useful commands:
 
 ```bash
-docker compose logs -f api                           # structured JSON logs
+docker compose logs -f api worker                    # structured JSON logs
 docker compose exec api pytest                       # all tests, including DB integration
 docker compose exec api alembic current              # current migration revision
 docker compose down                                  # stop (keeps data)
@@ -54,6 +75,7 @@ pip install -e ".[dev]"
 docker compose up -d db                              # just the database
 alembic upgrade head
 uvicorn app.main:app --reload
+python -m app.worker                                 # in a second terminal
 pytest                                               # integration tests skip without a DB
 ```
 
@@ -62,8 +84,10 @@ pytest                                               # integration tests skip wi
 All settings come from environment variables (see [.env.example](.env.example)), read by
 [app/core/config.py](app/core/config.py). Either set `DATABASE_URL`, or set the individual
 `POSTGRES_*` variables (Lightsail managed PostgreSQL also needs `POSTGRES_SSLMODE=require`).
-`ENABLE_TEST_ROUTES` mounts the `/v1/test/*` routes and is always ignored when
-`APP_ENV=production`. Secrets come only from the environment and are never committed.
+`ENABLE_TEST_ROUTES` mounts the `/v1/test/*` routes and switches the API and worker to the shared
+simulated clock; it is always ignored when `APP_ENV=production`. `NOTIFY_MAX_DELAY_S` (REQ-04,
+default 900) and the worker/webhook settings are listed in `.env.example`. Secrets come only from
+the environment and are never committed.
 
 ## Project layout
 
@@ -78,40 +102,41 @@ alembic/                migrations
 tests/
 docs/database.md        schema, relationships, conventions
 docs/spec-decisions.md  spec conflicts and interim decisions
+docs/cross-team-testing.md  how podmates test us, how we test them, results log
+scripts/                start-api.sh; verify_ledger_export.py (standalone ledger re-verification)
 ```
 
-| Module | Scope | Owner |
-|---|---|---|
-| `systems` | `monitored_system` (shared) | shared |
-| `metrics` | REQ-01 metric ingestion, `POST /v1/metrics` | Aryan |
-| `thresholds` | REQ-03 threshold config and breach detection | Aryan |
-| `events` | REQ-03 event creation, REQ-05 storage, `GET /v1/events` | Aryan (Phase 4 review: TBD) |
-| `ledger` | REQ-06/14/16 hash-chained audit ledger, `/v1/ledger/*` | teammate |
-| `notifications` | REQ-04/11 outbox, webhooks, reminders | teammate |
-| `monitoring_gaps` | REQ-02 gap detection (worker) | teammate |
-| `auth` | REQ-13 API keys and roles | teammate |
-| `testing` | `/v1/test/clock/advance`, `/v1/test/reset` | teammate |
+| Module | Scope |
+|---|---|
+| `systems` | `monitored_system` (shared) |
+| `metrics` | REQ-01 metric ingestion, `POST /v1/metrics` |
+| `thresholds` | REQ-03 threshold config and breach detection |
+| `events` | REQ-03 event creation, REQ-05 storage, `GET /v1/events` (Phase 4 review: TBD) |
+| `auth` | REQ-13 API keys (hashed) and roles |
+| `ledger` | REQ-06/14 hash-chained audit ledger, `/v1/ledger/*`, `/v1/events/{id}/audit` (REQ-16: Phase 5) |
+| `notifications` | REQ-04 outbox, `POST /v1/webhooks`, delivery (REQ-11 reminders: Phase 4) |
+| `monitoring_gaps` | REQ-02 gap detection |
+| `worker` | background loop: gap sweeps, webhook delivery, REQ-04 overdue alerts, heartbeat |
+| `testing` | `/v1/test/clock/advance`, `/v1/test/clock`, `/v1/test/reset`, baseline fixtures |
 
 Each module grows `models.py`, `schemas.py`, `service.py` and `router.py` as needed. Modules talk
 to each other only through the `interface.py` files below.
 
-### Integration interfaces (not implemented yet)
+### Integration interfaces
 
 Under Q7.2 Decision 1, a state change, its ledger entry and its outbox row commit in **one
-transaction**. These interfaces define how modules call each other. They are deliberately **not**
-no-ops:
+transaction**. Modules call each other only through these FastAPI dependencies (tests replace them
+with `app.dependency_overrides`):
 
-| Interface (FastAPI dependency) | Behavior until implemented |
+| Interface | Production implementation |
 |---|---|
-| `modules/auth/interface.py` `get_principal()` → `Principal` | **Fails closed**: every protected request gets `401`. |
-| `modules/ledger/interface.py` `get_ledger()` → `LedgerWriter.append(session, ...)` | `UnimplementedLedger` raises `UnimplementedError` (shown to API callers as `501`) and aborts the transaction. |
-| `modules/notifications/interface.py` `get_notifier()` → `Notifier.enqueue(session, ...)` | `UnimplementedNotifier` raises `UnimplementedError` and aborts the transaction. |
-| `core/clock.py` `get_clock()` → `Clock.now()` | Real UTC. The testing module will swap in the simulated clock. |
-| `db/uow.py` `get_uow()` → `UnitOfWork` | Implemented: one transaction plus the module repositories. |
+| `modules/auth/interface.py` `get_principal()` → `Principal` | API-key lookup by sha256; **fails closed** (`401`) for missing, unknown or revoked keys |
+| `modules/ledger/interface.py` `get_ledger()` → `LedgerWriter.append(session, ...)` | `SqlLedgerWriter`: hash-chained entry in the caller's transaction |
+| `modules/notifications/interface.py` `get_notifier()` → `Notifier.enqueue(session, ...)` | `OutboxNotifier`: outbox row in the caller's transaction; the worker delivers it |
+| `core/clock.py` `get_clock()` → `Clock.now()` | Real UTC, or the shared simulated clock in the test environment |
+| `db/uow.py` `get_uow()` → `UnitOfWork` | One transaction plus the module repositories |
 
-Owners replace the `Unimplemented*` class (or the body of `get_principal`) and keep the Protocol
-signature. If a signature has to change, coordinate with the people calling it.
-`tests/test_interfaces.py` asserts that the production defaults stay fail-closed until then.
+`tests/test_interfaces.py` asserts this wiring and that auth stays fail-closed.
 
 ### Code layout inside a module
 
@@ -134,15 +159,20 @@ production Protocols.
 |---|---|---|
 | `POST /v1/metrics` | REQ-01, REQ-03 | Stores the sample; on a strict threshold breach (above/below) creates a `FLAGGED` event and returns `flagged_event_id`. Duplicate handling is temporary (D-04). |
 | `GET /v1/events` | REQ-03 | Filters `system_id`, `state`, `type`, `since`; `limit`/`offset` pagination (D-06). |
-| `GET /v1/events/{event_id}` | REQ-03, REQ-15, REQ-05 storage | Full event; records a `VIEW` ledger entry (REQ-14). |
-| `GET /healthz` | Q7.3 | Database connectivity. |
+| `GET /v1/events/{event_id}` | REQ-03, REQ-15, REQ-05 storage | Full event (gap events include start/end/duration); records a `VIEW` ledger entry (REQ-14). |
+| `GET /v1/events/{event_id}/audit` | REQ-14 | `[{actor_id, action, timestamp, seq}]` for one event. |
+| `GET /v1/ledger/export` | REQ-06 | Raw entries and hashes, paged with `after_seq`; re-verify with `scripts/verify_ledger_export.py`. |
+| `GET /v1/ledger/verify` | REQ-06 | `{valid, entries_checked, first_mismatch, head_seq, head_hash}`. |
+| `POST /v1/webhooks` | REQ-04 | Admin only; verification ping (`422` on failure); returns the HMAC signing secret once. |
+| `POST /v1/test/clock/advance`, `GET /v1/test/clock`, `POST /v1/test/reset` | Section 5.1 | Test environment only (`404` in production); admin only. |
+| `GET /healthz` | Q7.3 | Database connectivity and worker heartbeat. |
 
-Until auth exists, every `/v1` call returns `401`. Once auth exists, a breach and an event view
-return `501` until the ledger and notifications modules are implemented. Open contract details
-are listed in [docs/spec-decisions.md](docs/spec-decisions.md) (D-04, D-06, D-09).
+Monitoring gaps (REQ-02) have no endpoint of their own: the worker creates `monitoring_gap`
+events, which appear in `GET /v1/events?type=monitoring_gap`. Roles, open contract details and
+interim choices: [docs/spec-decisions.md](docs/spec-decisions.md) (D-04, D-06, D-09, D-11 to D-16).
 
-Thresholds are configured with `thresholds.service.add_threshold_version()`. Section 5 has
-no configuration endpoint yet (D-07).
+Thresholds are configured with `python -m app.cli add-threshold` (or
+`thresholds.service.add_threshold_version()`). Section 5 has no configuration endpoint yet (D-07).
 
 ## Checks
 
@@ -150,6 +180,7 @@ no configuration endpoint yet (D-07).
 pytest                          # unit + HTTP contract tests; integration tests skip without a DB
 pytest -m integration           # real-PostgreSQL tests (docker compose exec api pytest -m integration)
 pytest -m fuzz                  # Schemathesis fuzzing of /v1 (FUZZ_EXAMPLES=1000 for a deep run)
+pytest tests/contract -m contract  # black-box suite against a live service (CONTRACT_BASE_URL)
 ruff check . && ruff format --check .
 mypy                            # app/ and the test doubles' Protocol conformance
 bandit -q -r app                # static security analysis
@@ -163,7 +194,8 @@ Integration tests create and drop their own throwaway database. With `REQUIRE_PO
 
 Tables, relationships, conventions and how to extend them: [docs/database.md](docs/database.md).
 Migration `0002` adds `monitored_system`, `metric_sample`, `threshold_version` and `event`
-(REQ-01, REQ-03, storage part of REQ-05).
+(REQ-01, REQ-03, storage part of REQ-05). Migration `0003` adds accounts and keys, the ledger, the
+notification outbox and webhooks, gap columns and states, the test clock and the worker heartbeat.
 
 ## Database migrations
 

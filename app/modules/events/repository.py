@@ -5,10 +5,10 @@ from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import ColumnElement, Select, func, select
 from sqlalchemy.orm import Session
 
-from app.modules.events.models import Event, EventState, EventType
+from app.modules.events.models import OPEN_GAP_STATES, Event, EventState, EventType
 
 
 @dataclass(frozen=True)
@@ -32,9 +32,26 @@ class EventRepository(Protocol):
         self, system_id: UUID, metric_name: str, metric_timestamp: datetime
     ) -> Event | None: ...
 
+    # Declared before list(): inside the class body, `list` names that method from then on.
+    def get_for_update(self, event_id: UUID) -> Event | None:
+        """The event, locked until the end of the transaction."""
+        ...
+
+    def open_gaps(self) -> list[Event]:
+        """monitoring_gap events that haven't closed yet (REQ-02)."""
+        ...
+
+    def open_gap_for_system(self, system_id: UUID) -> Event | None: ...
+
     def list(self, filters: EventFilters, *, limit: int, offset: int) -> tuple[list[Event], int]:
         """Matching events, newest detected_at first, plus the total match count."""
         ...
+
+
+def _open_gap_filter() -> ColumnElement[bool]:
+    return (Event.type == EventType.MONITORING_GAP.value) & Event.state.in_(
+        [s.value for s in OPEN_GAP_STATES]
+    )
 
 
 def _apply_filters(stmt: Select, filters: EventFilters) -> Select:
@@ -83,6 +100,17 @@ class SqlEventRepository:
             Event.metric_name == metric_name,
             Event.metric_timestamp == metric_timestamp,
         )
+        return self._session.scalars(stmt).first()
+
+    def get_for_update(self, event_id: UUID) -> Event | None:
+        return self._session.get(Event, event_id, with_for_update=True)
+
+    def open_gaps(self) -> list[Event]:
+        stmt = select(Event).where(_open_gap_filter()).order_by(Event.detected_at, Event.id)
+        return list(self._session.scalars(stmt))
+
+    def open_gap_for_system(self, system_id: UUID) -> Event | None:
+        stmt = select(Event).where(_open_gap_filter(), Event.system_id == system_id)
         return self._session.scalars(stmt).first()
 
     def list(self, filters: EventFilters, *, limit: int, offset: int) -> tuple[list[Event], int]:

@@ -25,7 +25,20 @@ from app.modules.thresholds.models import ThresholdVersion
 from tests.conftest import T0
 
 ROOT = Path(__file__).resolve().parents[2]
-TABLES = ["event", "threshold_version", "metric_sample", "monitored_system"]
+TABLES = [
+    "notification_delivery",
+    "notification",
+    "webhook",
+    "ledger_entry",
+    "event",
+    "threshold_version",
+    "metric_sample",
+    "api_key",
+    "app_user",
+    "monitored_system",
+    "simulated_clock",
+    "worker_heartbeat",
+]
 
 
 def alembic_config(connection) -> Config:

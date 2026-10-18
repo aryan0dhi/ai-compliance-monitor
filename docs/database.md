@@ -8,6 +8,7 @@ to [spec-decisions.md](spec-decisions.md).
 |---|---|---|
 | `0001` | (baseline, empty) | |
 | `0002` | `monitored_system`, `metric_sample`, `threshold_version`, `event` | REQ-01, REQ-03, REQ-05 (storage only) |
+| `0003` | `app_user`, `api_key`, `ledger_entry`, `webhook`, `notification`, `notification_delivery`, `simulated_clock`, `worker_heartbeat`; gap columns/states on `event`; `gap_missed_intervals` on `monitored_system` | REQ-02, REQ-04, REQ-06, REQ-13, REQ-14 |
 
 ## Diagram
 
@@ -48,7 +49,7 @@ erDiagram
     event {
         uuid id PK
         text type "threshold_breach | monitoring_gap"
-        text state "FLAGGED | UNDER_REVIEW | DISPOSITIONED | CLOSED"
+        text state "breach: FLAGGED..CLOSED; gap: GAP_OPEN | REVIEWER_NOTIFIED | GAP_CLOSED"
         uuid system_id FK
         text metric_name "breach only"
         timestamptz metric_timestamp "breach only"
@@ -58,6 +59,8 @@ erDiagram
         timestamptz detected_at
         timestamptz retain_until ">= detected_at + 6 months"
         text evidence_bundle_hash "nullable, D-05"
+        timestamptz gap_started_at "gap only"
+        timestamptz gap_ended_at "gap only, set when closed"
     }
 ```
 
@@ -124,6 +127,37 @@ Flagged threshold breaches and monitoring gaps. Type and state names follow the 
 - Indexes support `GET /v1/events`: `(detected_at, id)` for the default newest-first ordering, plus
   `(system_id, detected_at)`, `state` and `type` for the filters.
 
+### `app_user`, `api_key` (module `auth`, REQ-13)
+- `app_user.id` is the `actor_id` written to the ledger. `role` is `system | viewer | reviewer |
+  admin`; `ck_app_user_system_scope` makes system accounts name exactly one `system_id` and human
+  accounts none. `threshold_version.changed_by` references it.
+- `api_key` stores only `key_hash` (sha256 of a 256-bit random key, unique) and a short
+  `key_prefix` to tell keys apart. Revoked keys keep their row (`revoked_at`).
+
+### `ledger_entry` (module `ledger`, REQ-06, REQ-14)
+- Append-only hash chain: `seq` (gapless, from 1), `prev_hash` = previous `entry_hash`
+  (`uq_ledger_entry_prev_hash` forbids forks), `entry_hash` = sha256 of the canonical entry
+  (D-14). `event_id` references `event` with RESTRICT, so an audited event can't be deleted.
+- `actor_id` deliberately has no FK, so an export can be verified on its own.
+- Tampering is detected, not prevented (Ex-5, AC-06): `GET /v1/ledger/verify` re-walks the chain.
+
+### `webhook`, `notification`, `notification_delivery` (module `notifications`, REQ-04)
+- `notification` is the outbox row written in the event's transaction; `deliver_by` = created +
+  `NOTIFY_MAX_DELAY_S`. `dispatched_at` stays NULL until a subscribed webhook exists.
+- `notification_delivery` is one row per (notification, webhook), with status, attempts, the
+  next attempt time and the last error. Partial indexes serve the worker's two queries.
+
+### Monitoring gaps (module `monitoring_gaps`, REQ-02) on `event`
+- `monitored_system.gap_missed_intervals` (default 3) sets the timeout per system.
+- Gap events have `type = 'monitoring_gap'`, their own states (D-12), `gap_started_at` (last data
+  before the gap) and `gap_ended_at` (first data after it, set when closed). CHECKs pair states
+  with types (INV-12) and require the gap fields. `uq_event_one_open_gap_per_system` allows one
+  open gap per system. `ix_metric_sample_system_id_received_at` finds when data resumed.
+
+### `simulated_clock`, `worker_heartbeat`
+Single-row tables: the test environment's clock offset, shared by the API and the worker (D-16),
+and the worker's liveness for `/healthz`.
+
 ## Retention (REQ-05): storage only
 
 Phase 3 implements the **storage** part of REQ-05:
@@ -150,15 +184,13 @@ Phase 3 implements the **storage** part of REQ-05:
    review it by hand. Never edit a migration that has already been merged.
 4. **Reference events with** `event_id uuid NOT NULL REFERENCES event(id) ON DELETE RESTRICT`.
 
-Expected additions from other modules (Model 2), none of them part of this migration:
+Still to come (Model 2):
 
-| Table / change | Owner | Links to |
+| Table / change | Phase | Links to |
 |---|---|---|
-| `ledger_entry` (hash chain), `record_key` | ledger / audit | `event.id` |
-| notification outbox, webhooks | notifications | `event.id` |
-| gap columns on `event` (e.g. gap start/end), or a `monitoring_gap` table | monitoring gaps | `event.id`, `monitored_system.id` |
-| users, `api_key`; FK on `threshold_version.changed_by` | auth | `monitored_system.id` |
-| `art349_field`, `disposition`, `escalation`, `report` | Phase 4–5 | `event.id` |
+| `record_key` (REQ-16 crypto-shredding) | 5 | `event.id` |
+| `art349_field`, `disposition`, `escalation`, `report` | 4–5 | `event.id` |
+| new `ledger_entry.entry_type` values (`FIELD_CONFIRMED`, `DISPOSITION`, ...) | 4 | alter `ck_ledger_entry_entry_type` |
 
 Changing `event.state` or `event.type` values: alter the `ck_event_state` / `ck_event_type` CHECK
 constraints in a migration, update `EventState` / `EventType`, and update D-03 in spec-decisions.md.

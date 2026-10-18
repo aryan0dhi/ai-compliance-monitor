@@ -21,14 +21,12 @@ from tests.integration.conftest import migrate, throwaway_database
 def test_upgrade_downgrade_upgrade_round_trip(postgres_server_url):
     with throwaway_database(postgres_server_url) as engine:
         migrate(engine)
-        assert {"monitored_system", "metric_sample", "threshold_version", "event"} <= set(
-            inspect(engine).get_table_names()
-        )
+        assert set(Base.metadata.tables) <= set(inspect(engine).get_table_names())
         migrate(engine, "base", downgrade=True)
         assert set(inspect(engine).get_table_names()) <= {"alembic_version"}
         migrate(engine)
         with engine.connect() as conn:
-            assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0002"
+            assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0003"
 
 
 def test_models_and_migrations_have_no_drift(pg_engine):
@@ -128,17 +126,22 @@ def test_breach_event_requires_req03_fields(conn, missing):
     assert not insert_event(conn, **{missing: None})
 
 
+GAP = dict(
+    type="monitoring_gap",
+    state="GAP_CLOSED",
+    metric_name=None,
+    metric_timestamp=None,
+    observed_value=None,
+    threshold_version_id=None,
+    threshold_value=None,
+    gap_started_at=T0 - timedelta(minutes=15),
+    gap_ended_at=T0 + timedelta(hours=1),
+)
+
+
 def test_gap_events_may_omit_breach_fields_and_do_not_collide(conn):
-    gap = dict(
-        type="monitoring_gap",
-        metric_name=None,
-        metric_timestamp=None,
-        observed_value=None,
-        threshold_version_id=None,
-        threshold_value=None,
-    )
-    assert insert_event(conn, **gap)
-    assert insert_event(conn, **gap)  # NULLs never conflict in uq_event_triggering_sample
+    assert insert_event(conn, **GAP)
+    assert insert_event(conn, **GAP)  # NULLs never conflict in uq_event_triggering_sample
 
 
 def test_one_event_per_triggering_sample(conn):
@@ -284,3 +287,197 @@ def test_timestamps_round_trip_as_utc(conn):
         text("SELECT sampled_at FROM metric_sample WHERE system_id = :s"), {"s": SYS}
     ).scalar()
     assert value == T0 and value.utcoffset() == timedelta(0)
+
+
+# --- migration 0003: gaps, accounts, ledger, notifications ------------------------------------
+
+
+class TestGapConstraints:
+    """REQ-02 gap records and INV-12 (gap events never use review states)."""
+
+    OPEN = {**GAP, "state": "GAP_OPEN", "gap_ended_at": None}
+
+    def test_open_and_closed_gaps_accepted(self, conn):
+        assert insert_event(conn, **self.OPEN)
+        assert insert_event(conn, **GAP)
+
+    @pytest.mark.parametrize(
+        "change",
+        [
+            {"state": "FLAGGED"},  # INV-12
+            {"state": "UNDER_REVIEW"},
+            {"state": "DISPOSITIONED"},
+            {"gap_started_at": None},
+            {"state": "GAP_CLOSED", "gap_ended_at": None},
+            {"gap_ended_at": T0},  # open gap with an end time
+            {"state": "GAP_CLOSED", "gap_ended_at": T0 - timedelta(hours=1)},  # ends before start
+        ],
+    )
+    def test_invalid_gap_rejected(self, conn, change):
+        assert not insert_event(conn, **{**self.OPEN, **change})
+
+    @pytest.mark.parametrize("state", ["GAP_OPEN", "REVIEWER_NOTIFIED", "GAP_CLOSED"])
+    def test_breach_cannot_use_gap_states(self, conn, state):
+        assert not insert_event(conn, state=state)
+
+    def test_breach_cannot_carry_gap_fields(self, conn):
+        assert not insert_event(conn, gap_started_at=T0)
+
+    @pytest.mark.parametrize("second", ["GAP_OPEN", "REVIEWER_NOTIFIED"])
+    def test_one_open_gap_per_system(self, conn, second):
+        assert insert_event(conn, **self.OPEN)
+        assert not insert_event(conn, **{**self.OPEN, "state": second})
+        assert insert_event(conn, **GAP)  # closed gaps don't count
+
+    def test_gap_timeout_must_be_positive(self, conn):
+        assert violates(
+            conn,
+            "INSERT INTO monitored_system (id, name, gap_missed_intervals) VALUES (:id, 'g', 0)",
+            {"id": uuid.uuid4()},
+        )
+
+
+def insert_user(conn, *, role="viewer", system_id=None, name=None) -> uuid.UUID | None:
+    user_id = uuid.uuid4()
+    ok = not violates(
+        conn,
+        "INSERT INTO app_user (id, name, role, system_id) VALUES (:id, :n, :r, :s)",
+        {"id": user_id, "n": name or f"u-{user_id.hex[:8]}", "r": role, "s": system_id},
+    )
+    return user_id if ok else None
+
+
+class TestAccountConstraints:
+    def test_system_accounts_are_scoped_to_one_system(self, conn):
+        assert insert_user(conn, role="system", system_id=SYS)
+        assert insert_user(conn, role="system") is None
+        assert insert_user(conn, role="viewer", system_id=SYS) is None
+        assert insert_user(conn, role="superuser") is None
+
+    def test_user_names_are_unique(self, conn):
+        assert insert_user(conn, name="alice")
+        assert insert_user(conn, name="alice") is None
+
+    def test_key_hash_is_a_unique_sha256(self, conn):
+        user_id = insert_user(conn)
+        sql = (
+            "INSERT INTO api_key (id, user_id, key_hash, key_prefix)"
+            " VALUES (:id, :u, :h, 'acm_abc')"
+        )
+        assert not violates(conn, sql, {"id": uuid.uuid4(), "u": user_id, "h": "a" * 64})
+        assert violates(conn, sql, {"id": uuid.uuid4(), "u": user_id, "h": "a" * 64})
+        assert violates(conn, sql, {"id": uuid.uuid4(), "u": user_id, "h": "plain-key"})
+
+    def test_threshold_changed_by_must_be_a_user(self, conn):
+        sql = (
+            "INSERT INTO threshold_version (id, system_id, metric_name, metric_type, direction,"
+            " limit_value, valid_from, changed_by) VALUES (:id, :s, 'q', 'drift', 'above', 1,"
+            " :vf, :by)"
+        )
+        assert violates(conn, sql, {"id": uuid.uuid4(), "s": SYS, "vf": T0, "by": uuid.uuid4()})
+        user_id = insert_user(conn, role="admin")
+        assert not violates(conn, sql, {"id": uuid.uuid4(), "s": SYS, "vf": T0, "by": user_id})
+
+
+def insert_ledger(conn, seq, prev_hash, *, entry_type="VIEW", event_id=None) -> bool:
+    return not violates(
+        conn,
+        "INSERT INTO ledger_entry (seq, entry_type, event_id, actor_id, at, payload, prev_hash,"
+        " entry_hash) VALUES (:seq, :t, :e, NULL, :at, '{}', :p, :h)",
+        {"seq": seq, "t": entry_type, "e": event_id, "at": T0, "p": prev_hash, "h": "b" * 64},
+    )
+
+
+class TestLedgerConstraints:
+    def test_chain_cannot_fork(self, conn):
+        assert insert_ledger(conn, 1, "0" * 64)
+        assert not insert_ledger(conn, 2, "0" * 64)  # same predecessor twice
+
+    @pytest.mark.parametrize(
+        ("seq", "prev", "entry_type"),
+        [(0, "0" * 64, "VIEW"), (1, "xyz", "VIEW"), (1, "0" * 64, "EDITED")],
+    )
+    def test_checks(self, conn, seq, prev, entry_type):
+        assert not insert_ledger(conn, seq, prev, entry_type=entry_type)
+
+    def test_audited_event_cannot_be_deleted(self, conn):
+        event_id = uuid.uuid4()
+        assert insert_event(conn, id=event_id)
+        assert insert_ledger(conn, 1, "0" * 64, entry_type="FLAGGED", event_id=event_id)
+        assert violates(conn, "DELETE FROM event WHERE id = :id", {"id": event_id})
+
+
+class TestNotificationConstraints:
+    @pytest.fixture
+    def event_id(self, conn):
+        event_id = uuid.uuid4()
+        assert insert_event(conn, id=event_id)
+        return event_id
+
+    def insert_notification(self, conn, event_id, **overrides) -> uuid.UUID | None:
+        values = {
+            "id": uuid.uuid4(),
+            "e": event_id,
+            "t": "flag_notification",
+            "c": T0,
+            "d": T0 + timedelta(minutes=15),
+        }
+        values.update(overrides)
+        ok = not violates(
+            conn,
+            "INSERT INTO notification (id, event_id, notification_type, payload, created_at,"
+            " deliver_by) VALUES (:id, :e, :t, '{}', :c, :d)",
+            values,
+        )
+        return values["id"] if ok else None
+
+    def test_notification_checks(self, conn, event_id):
+        assert self.insert_notification(conn, event_id)
+        assert self.insert_notification(conn, event_id, t="sms") is None
+        assert self.insert_notification(conn, event_id, d=T0 - timedelta(seconds=1)) is None
+        assert self.insert_notification(conn, uuid.uuid4()) is None  # unknown event
+
+    @pytest.mark.parametrize(
+        ("types", "ok"),
+        [("{flag_notification}", True), ("{}", False), ("{flag_notification,sms}", False)],
+    )
+    def test_webhook_event_types(self, conn, types, ok):
+        sql = (
+            "INSERT INTO webhook (id, url, event_types, secret, created_at)"
+            " VALUES (:id, 'https://h.example', CAST(:t AS text[]), 's', :c)"
+        )
+        assert violates(conn, sql, {"id": uuid.uuid4(), "t": types, "c": T0}) is not ok
+
+    @pytest.mark.parametrize(
+        ("status", "delivered_at", "ok"),
+        [
+            ("PENDING", None, True),
+            ("DELIVERED", T0, True),
+            ("DELIVERED", None, False),
+            ("FAILED", T0, False),
+            ("SENT", None, False),
+        ],
+    )
+    def test_delivery_status(self, conn, event_id, status, delivered_at, ok):
+        notification_id = self.insert_notification(conn, event_id)
+        webhook_id = uuid.uuid4()
+        conn.execute(
+            text(
+                "INSERT INTO webhook (id, url, event_types, secret, created_at)"
+                " VALUES (:id, 'https://h.example', '{flag_notification}', 's', :c)"
+            ),
+            {"id": webhook_id, "c": T0},
+        )
+        sql = (
+            "INSERT INTO notification_delivery (notification_id, webhook_id, status, attempts,"
+            " next_attempt_at, delivered_at) VALUES (:n, :w, :s, 0, :t, :d)"
+        )
+        params = {"n": notification_id, "w": webhook_id, "s": status, "t": T0, "d": delivered_at}
+        assert violates(conn, sql, params) is not ok
+
+
+@pytest.mark.parametrize("table", ["simulated_clock", "worker_heartbeat"])
+def test_single_row_tables(conn, table):
+    columns = "id, offset_seconds" if table == "simulated_clock" else "id, worker_id, beat_at"
+    values = "2, 0" if table == "simulated_clock" else "2, 'w', now()"
+    assert violates(conn, f"INSERT INTO {table} ({columns}) VALUES ({values})")

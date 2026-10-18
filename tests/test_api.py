@@ -255,6 +255,10 @@ class TestGetEvents:
             "offset=9223372036854775808",  # > bigint: was a 500 on PostgreSQL
             "since=0.0",  # was read as Unix time 1970-01-01 (found by Schemathesis)
             "since=1695844800",
+            # Lax parsing read these as integers (found by Schemathesis on /v1/ledger/export):
+            "limit=1.0",
+            "offset=0.0",
+            "limit=1e1",
         ],
     )
     def test_invalid_query_is_400(self, api, flagged, query):
@@ -291,12 +295,19 @@ class TestGetEvents:
 
 
 class TestProductionWiring:
-    """No test doubles for auth: every endpoint must be denied (fail closed)."""
+    """Real authentication (only the unit of work is in memory): fail closed everywhere.
+
+    The real ledger and notifier need a PostgreSQL session; they are exercised end to end in
+    tests/integration/test_phase3_pg.py.
+    """
 
     @pytest.fixture
-    def prod_client(self) -> TestClient:
-        return TestClient(create_app())
+    def prod_client(self, uow) -> TestClient:
+        app = create_app()
+        app.dependency_overrides[get_uow] = lambda: uow
+        return TestClient(app)
 
+    @pytest.mark.parametrize("headers", [{}, {"Authorization": "Bearer anything"}])
     @pytest.mark.parametrize(
         ("method", "path", "kwargs"),
         [
@@ -304,17 +315,20 @@ class TestProductionWiring:
             ("post", "/v1/metrics", {"json": {"garbage": True}}),  # 401 before body validation
             ("get", "/v1/events", {}),
             ("get", f"/v1/events/{uuid4()}", {}),
+            ("get", f"/v1/events/{uuid4()}/audit", {}),
+            ("get", "/v1/ledger/export", {}),
+            ("get", "/v1/ledger/verify", {}),
+            ("post", "/v1/webhooks", {"json": {"url": "https://x.example", "event_types": []}}),
         ],
     )
-    def test_unauthenticated_requests_denied(self, prod_client, method, path, kwargs):
-        resp = getattr(prod_client, method)(
-            path, headers={"Authorization": "Bearer anything"}, **kwargs
-        )
+    def test_unauthenticated_requests_denied(self, prod_client, method, path, kwargs, headers):
+        resp = getattr(prod_client, method)(path, headers=headers, **kwargs)
         assert resp.status_code == 401
-        assert "not implemented" in resp.json()["detail"]
+        assert resp.json() == {"detail": "Missing or invalid API key"}
 
-    def test_real_ledger_and_notifier_block_breach(self, uow, clock):
-        """Auth stubbed, but the real ledger/notifier: a breach returns 501 and stores nothing."""
+    def test_real_system_key_submits_metrics(self, uow, ledger, notifier, clock):
+        from app.modules.auth.service import create_user
+
         uow.seed_system(SYSTEM_ID)
         uow.seed_threshold(
             SYSTEM_ID,
@@ -324,33 +338,29 @@ class TestProductionWiring:
             limit="0.30",
             valid_from=T0 - timedelta(days=1),
         )
+        system_key = create_user(uow, name="sys", role=Role.SYSTEM, system_id=SYSTEM_ID)
+        viewer_key = create_user(uow, name="viewer", role=Role.VIEWER)
         app = create_app()
         app.dependency_overrides.update(
             {
-                get_principal: lambda: system_principal(SYSTEM_ID),
                 get_uow: lambda: uow,
+                get_ledger: lambda: ledger,
+                get_notifier: lambda: notifier,
                 get_clock: lambda: clock,
             }
         )
         client = TestClient(app)
-        resp = client.post("/v1/metrics", json=VALID_METRIC)
-        assert resp.status_code == 501
-        assert "app/modules/ledger" in resp.json()["detail"]
-        assert uow.metrics.rows == {} and uow.events.rows == {}
 
-        # A non-breaching sample needs neither integration and is stored.
-        ok = client.post("/v1/metrics", json={**VALID_METRIC, "value": 0.1})
-        assert ok.status_code == 201
+        def auth(issued):
+            return {"Authorization": f"Bearer {issued.api_key}"}
 
-    def test_real_ledger_blocks_event_view(self, uow):
-        uow.seed_system(SYSTEM_ID)
-        from tests.test_event_queries import make_event
-
-        event = make_event(SYSTEM_ID)
-        uow.events.rows[event.id] = event
-        app = create_app()
-        app.dependency_overrides.update(
-            {get_principal: lambda: user_principal(Role.VIEWER), get_uow: lambda: uow}
+        resp = client.post("/v1/metrics", json=VALID_METRIC, headers=auth(system_key))
+        assert resp.status_code == 201
+        assert ledger.calls[0]["actor_id"] == system_key.user_id
+        # The viewer key can read but not submit; the system key can submit but not read.
+        assert (
+            client.post("/v1/metrics", json=VALID_METRIC, headers=auth(viewer_key)).status_code
+            == 403
         )
-        resp = TestClient(app).get(f"/v1/events/{event.id}")
-        assert resp.status_code == 501
+        assert client.get("/v1/events", headers=auth(system_key)).status_code == 403
+        assert client.get("/v1/events", headers=auth(viewer_key)).json()["total"] == 1
