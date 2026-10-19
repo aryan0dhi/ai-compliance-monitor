@@ -306,6 +306,114 @@ jobs:
           echo "CodeQL findings: $total (not accepted: $n)"
           [ "$n" -eq 0 ]
 
+  contract:
+    name: Contract - black-box suite (docker compose)
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ github.workflow }}-contract-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+    env:
+      # The baseline fixture system (app/modules/testing/fixtures.py).
+      SYSTEM_ID: 550e8400-e29b-41d4-a716-446655440000
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Detect contract suite
+        id: detect
+        run: |
+          set -eu
+          if [ -n "$(git ls-files tests/contract/test_contract.py)" ] && [ -n "$(git ls-files docker-compose.yml)" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::No tracked contract suite or docker-compose.yml yet; skipping."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # A test deployment: test routes and the simulated clock on, and webhooks allowed to reach
+      # the suite's receiver on the compose network. The database password is per run.
+      - name: Write .env
+        if: steps.detect.outputs.run == 'true'
+        run: |
+          set -eu
+          password=$(openssl rand -hex 16)
+          sed -e 's/^APP_ENV=.*/APP_ENV=test/' \
+              -e 's/^ENABLE_TEST_ROUTES=.*/ENABLE_TEST_ROUTES=true/' \
+              -e 's/^WEBHOOK_ALLOW_PRIVATE_NETWORKS=.*/WEBHOOK_ALLOW_PRIVATE_NETWORKS=true/' \
+              -e "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$password/" \
+              .env.example > .env
+
+      - name: Start stack
+        if: steps.detect.outputs.run == 'true'
+        run: docker compose up --build --detach --wait --wait-timeout 300
+
+      # Keys exist only in this run's throwaway database; they're masked in the log anyway.
+      - name: Issue API keys
+        if: steps.detect.outputs.run == 'true'
+        run: |
+          set -eu
+          cli() { docker compose exec -T api python -m app.cli "$@"; }
+          issue() {
+            var=$1; shift
+            k=$(cli create-user "$@" | sed -n 's/^api_key: //p')
+            [ -n "$k" ] || { echo "::error::create-user $* printed no key"; exit 1; }
+            echo "::add-mask::$k"
+            echo "export $var=$k" >> "$RUNNER_TEMP/contract.env"
+          }
+          cli create-system --id "$SYSTEM_ID" --name loan-scorer > /dev/null || true
+          : > "$RUNNER_TEMP/contract.env"
+          issue CONTRACT_SYSTEM_KEY --name ci-system --role system --system-id "$SYSTEM_ID"
+          issue CONTRACT_VIEWER_KEY --name ci-viewer --role viewer
+          issue CONTRACT_ADMIN_KEY --name ci-admin --role admin
+
+      # Runs inside the api container so the worker container can reach the suite's webhook
+      # receiver at api:8099 (the worker delivers webhooks, not the api).
+      - name: Run contract suite
+        if: steps.detect.outputs.run == 'true'
+        run: |
+          set -eu
+          . "$RUNNER_TEMP/contract.env"
+          docker compose exec -T \
+            -e CONTRACT_SYSTEM_KEY -e CONTRACT_VIEWER_KEY -e CONTRACT_ADMIN_KEY \
+            -e CONTRACT_BASE_URL=http://localhost:8000 \
+            -e CONTRACT_SYSTEM_ID="$SYSTEM_ID" \
+            -e CONTRACT_RECEIVER_BIND=0.0.0.0:8099 \
+            -e CONTRACT_RECEIVER_URL=http://api:8099/contract-hook \
+            -e CONTRACT_REPORT_DIR=/tmp/contract-report \
+            api pytest tests/contract -m contract -v -rs -p no:cacheprovider \
+              --junitxml=/tmp/contract-report/junit.xml
+
+      # A skipped contract test means a check that never ran, so it fails the job too.
+      - name: Fail on skipped tests
+        if: steps.detect.outputs.run == 'true'
+        run: |
+          set -eu
+          docker compose cp api:/tmp/contract-report/junit.xml "$RUNNER_TEMP/junit.xml"
+          skipped=$(python3 -c 'import sys, xml.etree.ElementTree as ET; print(sum(int(s.get("skipped", 0)) for s in ET.parse(sys.argv[1]).getroot().iter("testsuite")))' "$RUNNER_TEMP/junit.xml")
+          echo "Skipped contract tests: $skipped"
+          [ "$skipped" -eq 0 ]
+
+      - name: Collect report
+        if: steps.detect.outputs.run == 'true' && !cancelled()
+        run: docker compose cp api:/tmp/contract-report ./contract-report || true
+
+      - name: Upload report
+        if: steps.detect.outputs.run == 'true' && !cancelled()
+        uses: actions/upload-artifact@v7
+        with:
+          name: contract-report
+          path: contract-report
+          if-no-files-found: ignore
+
+      - name: Service logs
+        if: steps.detect.outputs.run == 'true' && failure()
+        run: docker compose logs --no-color --tail 300 api worker
+
+      - name: Stop stack
+        if: steps.detect.outputs.run == 'true' && always()
+        run: docker compose down --volumes
+
   actionlint:
     name: Lint - actionlint
     runs-on: ubuntu-latest
