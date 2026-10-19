@@ -112,8 +112,8 @@ async def setup_session(
         sessions.begin(session_id, setup)
     except SessionExists:
         return error(status.HTTP_409_CONFLICT, "session_id already exists", "tester")
-    except SetupInProgress as exc:
-        return error(status.HTTP_409_CONFLICT, str(exc), "tester")
+    except SetupInProgress:
+        return error(status.HTTP_409_CONFLICT, "another session is being set up", "tester")
     try:
         await run_in_threadpool(reset_test_environment, uow)
         clock.invalidate()
