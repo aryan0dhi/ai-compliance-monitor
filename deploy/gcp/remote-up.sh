@@ -34,6 +34,9 @@ sudo chmod 600 "$ENV_FILE"
 
 cd "$APP/deploy/gcp"
 sudo docker compose up -d --build --remove-orphans
+# The Caddyfile is a bind-mounted file and this release replaced it, but compose only recreates
+# containers whose definition changed; recreate Caddy so it reads the new routes.
+sudo docker compose up -d --force-recreate --no-deps caddy
 
 for attempt in $(seq 1 60); do
     if sudo docker compose exec -T api python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')" 2>/dev/null; then
