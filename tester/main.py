@@ -14,6 +14,7 @@ environment, or per target from the JSON file named by TESTER_TARGETS_FILE:
 import json
 import logging
 import os
+import re
 import threading
 import uuid
 from collections.abc import Callable, Iterator
@@ -22,7 +23,6 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
 import httpx
 from fastapi import Depends, FastAPI, Request, status
@@ -117,13 +117,14 @@ def _non_empty_str(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip())
 
 
+# Same pattern as tester-openapi.yaml: a plain http(s) base URL, no query, fragment or escapes.
+TARGET_URL = re.compile(r"https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~/-]*)?")
+
+
 def _target_url(value: Any) -> str | None:
-    if not _non_empty_str(value):
+    if not isinstance(value, str) or not TARGET_URL.fullmatch(value):
         return None
-    parts = urlsplit(value.strip())
-    if parts.scheme not in ("http", "https") or not parts.netloc:
-        return None
-    return value.strip().rstrip("/")
+    return value.rstrip("/")
 
 
 def _forwarded_error(resp: httpx.Response) -> JSONResponse:
@@ -274,9 +275,10 @@ async def run(
     runner: Runner = Depends(get_runner),
 ) -> JSONResponse:
     body = await _json_object(request)
-    if body is None or not _non_empty_str(body.get("session_id")):
+    session_id = body.get("session_id") if body is not None else None
+    if not isinstance(session_id, str) or not session_id:
         return error(status.HTTP_400_BAD_REQUEST, "session_id must be a non-empty string", "tester")
-    session = sessions.get(body["session_id"])
+    session = sessions.get(session_id)
     if session is None:
         return error(status.HTTP_404_NOT_FOUND, "unknown session_id", "tester")
     with session.lock:

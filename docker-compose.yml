@@ -78,7 +78,13 @@ services:
       CONTRACT_SYSTEM_KEY: ${CONTRACT_SYSTEM_KEY:-}
       CONTRACT_VIEWER_KEY: ${CONTRACT_VIEWER_KEY:-}
       CONTRACT_ADMIN_KEY: ${CONTRACT_ADMIN_KEY:-}
+      CONTRACT_SYSTEM_ID: ${CONTRACT_SYSTEM_ID:-550e8400-e29b-41d4-a716-446655440000}
+      # Webhook checks need a receiver the target's worker can reach, e.g. on this network:
+      # CONTRACT_WEBHOOKS=on CONTRACT_RECEIVER_BIND=0.0.0.0:8099
+      # CONTRACT_RECEIVER_URL=http://tester:8099/contract-hook (as the CI self-test does).
       CONTRACT_WEBHOOKS: ${CONTRACT_WEBHOOKS:-off}
+      CONTRACT_RECEIVER_BIND: ${CONTRACT_RECEIVER_BIND:-127.0.0.1:0}
+      CONTRACT_RECEIVER_URL: ${CONTRACT_RECEIVER_URL:-}
     ports:
       - "127.0.0.1:${TESTER_HOST_PORT:-8100}:8100"
     volumes:

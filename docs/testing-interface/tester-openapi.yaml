@@ -33,7 +33,8 @@ paths:
                 target_url:
                   type: string
                   format: uri
-                  description: The system's base URL (http or https)
+                  pattern: '^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~/-]*)?$'
+                  description: The system's base URL (http or https, no query or fragment)
       responses:
         "201":
           description: Session created and target ready

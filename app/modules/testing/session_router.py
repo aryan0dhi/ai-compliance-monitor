@@ -61,7 +61,7 @@ def _parse_setup(raw: bytes) -> tuple[str, dict[str, Any]] | str:
     if not isinstance(body, dict):
         return "body must be a JSON object"
     session_id = body.get("session_id")
-    if not isinstance(session_id, str) or not session_id.strip():
+    if not isinstance(session_id, str) or not session_id:
         return "session_id must be a non-empty string"
     if len(session_id) > MAX_SESSION_ID_LENGTH:
         return f"session_id must be at most {MAX_SESSION_ID_LENGTH} characters"

@@ -219,7 +219,7 @@ class Target:
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
-        if request.url.path == "/test/setup":
+        if request.url.path.endswith("/test/setup"):
             if isinstance(self.setup_response, Exception):
                 raise self.setup_response
             if self.setup_response is not None:
@@ -227,7 +227,7 @@ class Target:
                 return httpx.Response(code, json=body) if body is not None else httpx.Response(code)
             sent = json.loads(request.content)
             return httpx.Response(201, json={"session_id": sent["session_id"]})
-        if request.url.path == "/test/report":
+        if request.url.path.endswith("/test/report"):
             if isinstance(self.report_response, Exception):
                 raise self.report_response
             code, body = self.report_response
@@ -305,6 +305,9 @@ def test_setup_creates_a_session_and_sets_up_the_target(tester):
         b'{"target_url": ""}',
         b'{"target_url": "ftp://x"}',
         b'{"target_url": 1}',
+        b'{"target_url": "https://x/?a=1"}',
+        b'{"target_url": "https://x/#top"}',
+        b'{"target_url": "https://x/\\u000f"}',  # httpx can't request it (found by fuzzing)
     ],
 )
 def test_invalid_setup_is_400(tester, body):

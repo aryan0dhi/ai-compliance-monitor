@@ -394,6 +394,45 @@ jobs:
           echo "Skipped contract tests: $skipped"
           [ "$skipped" -eq 0 ]
 
+      # Course testing interface (issue #11): our tester runs the suite against our system
+      # through /test/setup, /test/run and /test/report, the way graders call them. The tester's
+      # webhook receiver listens on tester:8099 so the worker can deliver to it.
+      - name: Start tester
+        if: steps.detect.outputs.run == 'true'
+        run: |
+          set -eu
+          . "$RUNNER_TEMP/contract.env"
+          export CONTRACT_SYSTEM_KEY CONTRACT_VIEWER_KEY CONTRACT_ADMIN_KEY
+          export CONTRACT_SYSTEM_ID="$SYSTEM_ID" CONTRACT_WEBHOOKS=on \
+            CONTRACT_RECEIVER_BIND=0.0.0.0:8099 \
+            CONTRACT_RECEIVER_URL=http://tester:8099/contract-hook
+          docker compose --profile tester up --build --detach tester
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://localhost:8100/openapi.json > /dev/null; then exit 0; fi
+            sleep 2
+          done
+          echo "::error::the tester did not start"
+          exit 1
+
+      - name: Self-test the testing interface
+        if: steps.detect.outputs.run == 'true'
+        run: |
+          set -eu
+          mkdir -p testing-interface-report
+          python3 scripts/check_testing_interface.py \
+            --tester http://localhost:8100 --system http://localhost:8000 \
+            --target-url http://api:8000 \
+            --save testing-interface-report/tester-report.json \
+            --expect-all-pass --expect-code-coverage
+
+      - name: Upload testing-interface report
+        if: steps.detect.outputs.run == 'true' && !cancelled()
+        uses: actions/upload-artifact@v7
+        with:
+          name: testing-interface-report
+          path: testing-interface-report
+          if-no-files-found: ignore
+
       - name: Collect report
         if: steps.detect.outputs.run == 'true' && !cancelled()
         run: docker compose cp api:/tmp/contract-report ./contract-report || true
@@ -408,11 +447,11 @@ jobs:
 
       - name: Service logs
         if: steps.detect.outputs.run == 'true' && failure()
-        run: docker compose logs --no-color --tail 300 api worker
+        run: docker compose --profile tester logs --no-color --tail 300 api worker tester
 
       - name: Stop stack
         if: steps.detect.outputs.run == 'true' && always()
-        run: docker compose down --volumes
+        run: docker compose --profile tester down --volumes
 
   actionlint:
     name: Lint - actionlint

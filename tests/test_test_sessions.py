@@ -112,7 +112,6 @@ def test_reused_session_id_is_409(interface):
         b"[]",
         b"{}",
         b'{"session_id": ""}',
-        b'{"session_id": "   "}',
         b'{"session_id": 7}',
         json.dumps({"session_id": "x" * 201}).encode(),
         b'{"session_id": "s1", "setup": []}',
