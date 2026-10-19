@@ -4,9 +4,34 @@ The service runs on one Compute Engine VM in project **AIREG** (`aireg-512020`):
 container image as development, started with [deploy/gcp/compose.yaml](../deploy/gcp/compose.yaml).
 
 ```
-internet ──443/80──► caddy (HTTPS, Let's Encrypt) ──► api (uvicorn) ──► db (PostgreSQL 16)
-                                                       worker ─────────┘   (not published)
+internet ──443/80──► caddy (HTTPS, Let's Encrypt) ─┬─► api (uvicorn) ──► db (PostgreSQL 16)
+                                                    │   worker ─────────┘   (not published)
+                                                    └─► tester (/tester: hosted contract suite)
 ```
+
+## Hosted tester (`/tester`)
+
+The registry's "Tester base URL" is `https://<host>/tester`. It runs the black-box contract
+suite (`tests/contract`) against an **allowlisted** service and returns the report:
+
+```bash
+curl -X POST https://<host>/tester/runs -H "Content-Type: application/json" -d '{
+  "target_url": "https://<target>", "system_key": "...", "viewer_key": "...", "admin_key": "...",
+  "system_id": "<optional, target fixture id>"}'          # → 202 {"run_id": ..., "status_url": ...}
+curl https://<host>/tester/runs/<run_id>                  # status, summary, coverage, per-test results
+curl https://<host>/tester/runs/<run_id>/report           # Markdown report
+```
+
+- **Allowed targets:** this deployment, plus `TESTER_EXTRA_TARGETS` in `deploy/gcp/.env`
+  (default: `https://eu-ai-act-monitor-api.fly.dev`, Team 8). Anything else is `400`.
+- **Keys:** the caller sends the target's keys for that run only. They're passed to the test
+  process and never stored, logged or returned.
+- **Limits:** one run at a time (`409` otherwise), at most 10 minutes; a full run takes about a
+  minute. A run resets the target's test data (`POST /v1/test/reset`).
+- **Webhooks:** during a run the suite's receiver is public at `https://<host>/tester/hook/<run>`,
+  so webhook delivery (AC-04) is checked against the target's deployment.
+- The tester container has no database access and receives nothing from `.env` except the site
+  address.
 
 | Item | Value |
 |---|---|
@@ -50,7 +75,7 @@ On the VM (`gcloud compute ssh compliance-monitor --zone us-central1-a`), in
 
 ```bash
 sudo docker compose ps                     # status
-sudo docker compose logs -f api worker     # JSON logs
+sudo docker compose logs -f api worker     # JSON logs (add tester for hosted test runs)
 sudo docker compose exec api python -m app.cli verify-ledger
 sudo docker compose restart worker
 ```
