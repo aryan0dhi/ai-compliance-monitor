@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.contract.cadence import cadence_violations
+
 covers = pytest.mark.covers
 VERIFIER = Path(__file__).resolve().parents[2] / "scripts" / "verify_ledger_export.py"
 UNKNOWN_EVENT = "00000000-0000-4000-8000-000000000000"
@@ -260,23 +262,24 @@ def gap_ids(api) -> dict[str, dict]:
     return {e["event_id"]: e for e in items(page.json())}
 
 
+def advance_clock(api, seconds: int) -> None:
+    resp = api.call("POST", "/v1/test/clock/advance", as_="admin", json={"seconds": seconds})
+    assert resp.status_code == 200, resp.text
+
+
 def open_gap(api) -> dict:
     """Send one sample, then withhold data until a gap opens. Checks the 2-interval boundary."""
     interval = api.target.interval_s
     known = set(gap_ids(api))
     assert send(api, 0.1)[0].status_code == 201  # last data now
 
-    def advance(seconds):
-        resp = api.call("POST", "/v1/test/clock/advance", as_="admin", json={"seconds": seconds})
-        assert resp.status_code == 200, resp.text
-
     # Boundary: withholding 2 intervals must NOT trigger.
-    advance(2 * interval)
+    advance_clock(api, 2 * interval)
     time.sleep(GAP_SETTLE_S)
     assert set(gap_ids(api)) == known
 
     # 3 intervals: a gap event appears.
-    advance(interval)
+    advance_clock(api, interval)
 
     def new_gap():
         return next((g for i, g in gap_ids(api).items() if i not in known), None)
@@ -293,6 +296,37 @@ def close_gap(api, gap: dict) -> None:
     detail = api.call("GET", f"/v1/events/{gap['event_id']}", as_="viewer").json()
     if "gap_duration_seconds" in detail:
         assert detail["gap_duration_seconds"] >= 3 * api.target.interval_s
+
+
+@covers(
+    reqs=["REQ-01", "REQ-02"],
+    acs=["AC-01"],
+    endpoints=["POST /v1/metrics", "POST /v1/test/clock/advance", "GET /v1/events"],
+)
+def test_ac01_one_hour_at_the_sampling_interval_opens_no_gap(api, test_routes):
+    """A baseline sample, then 12 more one interval apart on the test clock (1 hour at 5 min).
+
+    The timestamp log is each sample's simulated send time (real time plus the seconds this test
+    advanced), so slow requests show up as drift; it is checked with the AC-01 cadence check. A
+    sample more than 10 s off isn't flagged by the service (D-17), so only the on-schedule hour
+    is checked here; the boundaries are unit-tested.
+    """
+    if not test_routes:
+        pytest.skip("service has no /v1/test routes (AC-01's hour needs the test clock)")
+    interval = api.target.interval_s
+    known = set(gap_ids(api))
+    advanced, log = 0, []
+    for i in range(13):
+        if i:
+            advance_clock(api, interval)
+            advanced += interval
+        at = datetime.now(UTC) + timedelta(seconds=advanced)
+        resp, _ = send(api, 0.1, timestamp=at.isoformat())
+        assert resp.status_code == 201, resp.text
+        log.append(at)
+    time.sleep(GAP_SETTLE_S)
+    assert cadence_violations(log, interval_s=interval) == []
+    assert set(gap_ids(api)) == known
 
 
 @covers(
