@@ -407,7 +407,7 @@ jobs:
             CONTRACT_RECEIVER_BIND=0.0.0.0:8099 \
             CONTRACT_RECEIVER_URL=http://tester:8099/contract-hook
           docker compose --profile tester up --build --detach tester
-          for attempt in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             if curl -fsS http://localhost:8100/openapi.json > /dev/null; then exit 0; fi
             sleep 2
           done

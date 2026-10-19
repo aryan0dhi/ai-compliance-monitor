@@ -3,15 +3,17 @@
 import copy
 import importlib.util
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "check_testing_interface.py"
 _spec = importlib.util.spec_from_file_location("check_testing_interface", SCRIPT)
+assert _spec is not None and _spec.loader is not None
 check = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(check)
 
-GOOD = {
+GOOD: dict[str, Any] = {
     "session_id": "s1",
     "target_url": "http://api:8000",
     "results": [
@@ -29,7 +31,7 @@ GOOD = {
 
 def broken(path: list, value):
     report = copy.deepcopy(GOOD)
-    node = report
+    node: Any = report
     for key in path[:-1]:
         node = node[key]
     if value is KeyError:

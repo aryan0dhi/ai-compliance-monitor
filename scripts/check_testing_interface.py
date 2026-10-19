@@ -77,7 +77,11 @@ def coverage_problems(name: str, entry) -> list[str]:
     if covered is None and total is None:
         return problems
     ints = all(isinstance(v, int) and not isinstance(v, bool) for v in (covered, total))
-    if not ints or covered < 0 or total < 0 or covered > total:
+    if not ints or not isinstance(covered, int) or not isinstance(total, int):
+        ok = False
+    else:
+        ok = 0 <= covered <= total
+    if not ok:
         problems.append(
             f"coverage.{name}: covered/total must be integers 0 <= covered <= total, or both null"
         )
@@ -147,7 +151,8 @@ def main() -> int:
     if not check.expect(status == 201, f"tester setup -> 201 (got {status}: {body})"):
         return 1
     session_id = body.get("session_id") if isinstance(body, dict) else None
-    if not check.expect(isinstance(session_id, str) and bool(session_id), "setup returned an id"):
+    if not isinstance(session_id, str) or not session_id:
+        check.expect(False, "setup returned a session id")
         return 1
 
     # 2. The system already has this session.
