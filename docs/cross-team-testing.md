@@ -193,6 +193,13 @@ pytest process. Two sessions against the same target at once would reset each ot
 run one session per target at a time. On the test deployment the webhook checks are skipped
 (`CONTRACT_WEBHOOKS=off`), because no target can deliver webhooks into the VM.
 
+**CI self-test.** The contract CI job also starts the tester and runs
+`scripts/check_testing_interface.py` against our own system, the way graders call the
+interface. It fails on a wrong status code, a malformed report or error body, any test that
+doesn't pass, or unmeasured code coverage. The report is uploaded as the
+`testing-interface-report` artifact. Schemathesis checks both OpenAPI documents in the regular
+test run (`tests/test_testing_interface_schemas.py`).
+
 ## 3. Measuring server-side code coverage
 
 `GET /test/report` (section 1a) gives per-session numbers for the API process without a restart.
