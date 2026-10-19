@@ -8,6 +8,7 @@ This page covers both directions and is where the results go.
 - [1. Testing our service (podmates)](#1-testing-our-service-podmates)
 - [1a. Course testing interface: `/test/setup` and `/test/report`](#1a-course-testing-interface-testsetup-and-testreport)
 - [2. Testing a podmate's service (us)](#2-testing-a-podmates-service-us)
+- [2a. Tester service: `/test/setup`, `/test/run`, `/test/report`](#2a-tester-service-testsetup-testrun-testreport)
 - [3. Measuring server-side code coverage](#3-measuring-server-side-code-coverage)
 - [4. Results log](#4-results-log)
 
@@ -135,6 +136,62 @@ time-dependent AC-02 check is skipped and reported as such.
 Without our codebase, the only black-box measure of a podmate's service is component and
 system-model coverage. **Code coverage of their service is theirs to measure**: ask them to run
 their server under coverage (as in section 3) during our run and share the figure.
+
+## 2a. Tester service: `/test/setup`, `/test/run`, `/test/report`
+
+The course interface's tester side wraps the same contract suite in an HTTP service that
+graders can call. It's a separate app (`tester/`, `uvicorn tester.main:app`), served at
+`<base URL>/tester` on the test deployment and on port 8100 locally
+(`docker compose --profile tester up -d tester`). Schema:
+[testing-interface/tester-openapi.yaml](testing-interface/tester-openapi.yaml). No key is needed
+to call it.
+
+```bash
+T=https://<site>/tester
+# 1. New session (UUID). The tester calls the target's POST /test/setup and waits for it.
+curl -X POST "$T/test/setup" -H 'Content-Type: application/json' \
+     -d '{"target_url": "https://<target system base URL>"}'
+# -> 201 {"session_id": "4f6c..."}
+# 2. Run the suite against the target's /v1 API (takes a few minutes); returns the report.
+curl -X POST "$T/test/run" -H 'Content-Type: application/json' -d '{"session_id": "4f6c..."}'
+# 3. Read the stored report again, unchanged.
+curl "$T/test/report?session_id=4f6c..."
+```
+
+**Report.** `results` lists each planned test once, in run order, as
+`{test_id, outcome, message, source?}`:
+
+| Outcome | Meaning |
+|---|---|
+| `pass` | Passed, including checks that expect a project error (a `401`, `403`, `404`, ...) |
+| `fail` | An assertion about the target's behaviour failed |
+| `error` | It couldn't complete. `source` says why: `system` for an unexpected 5xx, `communication` for a timeout or connection failure, `tester` for a problem in the suite or its setup |
+| `skip` | Not applicable (for example, webhook checks when no receiver is reachable) or never run because the run aborted |
+
+`coverage.code` comes from the target's `GET /test/report`. If that is unavailable or malformed,
+the tester reports `null` with the reason. `coverage.component` counts the Phase 3 pod-interface
+endpoints, and `coverage.system` counts the Phase 3 acceptance criteria, that at least one
+passing test exercised. Both use the `@covers` tags, with the lists in `tests/contract/scope.py`.
+
+**Statuses.** Setup returns `400` (no valid http(s) `target_url`). It passes a target's
+well-formed `400`/`404`/`409`/`500` through unchanged. It returns `500` with `system` when the
+target answers anything else, and `500` with `communication` when the target can't be reached.
+A failed setup creates no session. Run returns `404` (unknown session) or `409` (already run or
+running). If the run aborts (crash, or longer than `TESTER_RUN_TIMEOUT_S`, default 30 min), it
+returns `500` with `tester`, and the results so far are stored: the interrupted test is
+`error`/`tester` and the rest are `skip`. Report returns `409` until the run has ended. Every
+error body is `{message, source}`.
+
+**Keys for the target.** The tester's own `CONTRACT_SYSTEM_KEY`, `CONTRACT_VIEWER_KEY` and
+`CONTRACT_ADMIN_KEY` (and the other `CONTRACT_*` settings from section 2) apply to every target.
+Per-target values go in a JSON file named by `TESTER_TARGETS_FILE`:
+`{"https://their-system.example": {"CONTRACT_SYSTEM_KEY": "...", "CONTRACT_SYSTEM_ID": "..."}}`.
+Keys are never part of a URL or the registry.
+
+**Limits.** Sessions and reports are kept in memory until the tester stops. Each run is its own
+pytest process. Two sessions against the same target at once would reset each other's data, so
+run one session per target at a time. On the test deployment the webhook checks are skipped
+(`CONTRACT_WEBHOOKS=off`), because no target can deliver webhooks into the VM.
 
 ## 3. Measuring server-side code coverage
 

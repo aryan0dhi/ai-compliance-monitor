@@ -65,4 +65,4 @@ sigterm = true
 [tool.mypy]
 python_version = "3.12"
 ignore_missing_imports = true
-files = ["app", "tests/fakes.py"]
+files = ["app", "tester", "tests/fakes.py"]
