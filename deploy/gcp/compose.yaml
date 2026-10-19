@@ -59,6 +59,23 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # Hosted cross-team tester at https://SITE_ADDRESS/tester (registry "Tester base URL"): runs
+  # tests/contract against an allowlisted service. Needs the test dependencies, so it uses its own
+  # image; it has no database access and gets no secrets from .env.
+  tester:
+    build:
+      context: ../..
+      args:
+        INSTALL_DEV: "true"
+    image: compliance-monitor-tester:latest
+    command: ["uvicorn", "app.tester.main:app", "--host", "0.0.0.0", "--port", "8100", "--root-path", "/tester"]
+    environment:
+      TESTER_ALLOWED_TARGETS: "https://${SITE_ADDRESS},${TESTER_EXTRA_TARGETS:-https://eu-ai-act-monitor-api.fly.dev}"
+      TESTER_PUBLIC_URL: "https://${SITE_ADDRESS}/tester"
+      TESTER_RECEIVER_BIND: "0.0.0.0:8099"
+      TESTER_RUN_TIMEOUT_S: "600"
+    restart: unless-stopped
+
   # Public entry point: automatic Let's Encrypt certificate for SITE_ADDRESS.
   caddy:
     image: caddy:2.8.4-alpine
@@ -74,6 +91,8 @@ services:
     depends_on:
       api:
         condition: service_healthy
+      tester:
+        condition: service_started
     restart: unless-stopped
 
 volumes:

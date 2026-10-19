@@ -1,8 +1,19 @@
-# HTTPS front for the API. SITE_ADDRESS is a hostname such as 34-1-2-3.sslip.io (deploy.sh sets
-# it from the VM's static IP); Caddy obtains and renews the certificate itself.
+# HTTPS front. SITE_ADDRESS is a hostname such as 34-1-2-3.sslip.io (deploy.sh sets it from the
+# VM's static IP); Caddy obtains and renews the certificate itself.
+#   /tester/hook/*  webhook receiver of the run in progress (tests/contract), in the tester container
+#   /tester/*       hosted cross-team tester (app/tester), prefix stripped
+#   everything else the monitoring API
 {$SITE_ADDRESS} {
 	encode gzip
-	reverse_proxy api:8000
+	handle /tester/hook* {
+		reverse_proxy tester:8099
+	}
+	handle_path /tester* {
+		reverse_proxy tester:8100
+	}
+	handle {
+		reverse_proxy api:8000
+	}
 	header {
 		Strict-Transport-Security "max-age=31536000"
 		X-Content-Type-Options "nosniff"
