@@ -25,6 +25,7 @@ final, because cross-team tests depend on them.
 | D-16 | Test environment: shared clock, reset scope, fixtures | Interim, **pod** (with D-07) |
 | D-17 | AC-01 cadence: what happens to a sample more than 10 s off schedule | Interim, **pod** |
 | D-18 | AC-05 checkpoints: calendar 5mo29d can fall after the 6-month minimum | Open, **pod** |
+| D-19 | Course testing interface: `/test/setup`, `/test/report` sessions, access, coverage | Interim (team) |
 
 ## Agenda for the next pod meeting
 
@@ -330,6 +331,34 @@ and `retain_until`, and accepts present or absent at 6mo1d. A purge that deletes
 **To agree.** Either read AC-05's "5mo29d" as "the day before `retain_until`" (the purge can
 run at `retain_until`), or keep the literal reading and have the purge wait until at least
 6mo1d.
+
+## D-19: Course testing interface (`POST /test/setup`, `GET /test/report`)
+
+**Gap.** The course's cross-team testing interface requires both endpoints but leaves several
+choices to each team. Spec: [docs/testing-interface/system-openapi.yaml](testing-interface/system-openapi.yaml).
+
+**Interim decisions.**
+- **Where.** At the service root, next to `/v1`, and only when test routes are enabled. They
+  don't exist in production (404), like `/v1/test/*`.
+- **Access.** No API key. The tester calls them knowing only the base URL, so a key would break
+  the interface. This is acceptable because setup only resets the test environment; the `/v1`
+  project API still needs keys, which are sent privately and never put in URLs or the registry.
+- **One session at a time.** Setup resets the one shared test database and coverage is measured
+  per process, so sessions can't overlap. A new setup with a new id ends the active session and
+  freezes its report; that is also the cleanup after an interrupted run. A setup while another
+  is still in progress gets `409`; a reused id gets `409`.
+- **Setup data.** `setup` must be a JSON object but doesn't select fixtures yet (D-07). Every
+  session starts from the baseline fixtures (as `POST /v1/test/reset`) with the test clock at
+  real time. API keys survive.
+- **Failure.** If the reset fails (for example, the database is down), setup returns `500` with
+  `source: "system"` and the session is forgotten, so the same id can be set up again.
+- **Coverage.** Line coverage of `app/` in the API process since the session's setup, measured
+  in-process with coverage.py's `sys.monitoring` core (it also sees request threads that already
+  exist). The worker process and the testing interface's own modules aren't measured. When
+  measurement isn't possible (coverage.py not installed, or the process already runs under
+  `coverage run`), `covered` and `total` are `null` and `basis` says why.
+- **Lifetime.** Sessions are in memory. After an API restart their reports are `404`, and the
+  tester sets up again. The last 100 sessions are kept.
 
 ## Other notes
 

@@ -6,6 +6,7 @@ something didn't work, and code, component and system-model coverage **for each 
 This page covers both directions and is where the results go.
 
 - [1. Testing our service (podmates)](#1-testing-our-service-podmates)
+- [1a. Course testing interface: `/test/setup` and `/test/report`](#1a-course-testing-interface-testsetup-and-testreport)
 - [2. Testing a podmate's service (us)](#2-testing-a-podmates-service-us)
 - [3. Measuring server-side code coverage](#3-measuring-server-side-code-coverage)
 - [4. Results log](#4-results-log)
@@ -70,6 +71,39 @@ to real time. API keys survive a reset, so call it at the start of every run.
   (standard library only). Edit any payload in `l.json` and run it again to see the tamper
   detected (AC-06).
 
+## 1a. Course testing interface: `/test/setup` and `/test/report`
+
+Testers and graders use these two endpoints around a run. They sit at the base URL (not under
+`/v1`), exist only in the test environment, and need **no API key**. The `/v1` calls made during
+the run still need the keys above. Full schema:
+[testing-interface/system-openapi.yaml](testing-interface/system-openapi.yaml). Choices: D-19.
+
+```bash
+# 1. Start a session: resets to the baseline fixtures, clock at real time, coverage from zero.
+curl -X POST "$BASE/test/setup" -H 'Content-Type: application/json' \
+     -d '{"session_id": "grader-42", "setup": {}}'
+# -> 201 {"session_id": "grader-42"}
+
+# 2. ... run the tests against $BASE/v1 with the keys ...
+
+# 3. Code coverage of what the run reached (reading it changes nothing).
+curl "$BASE/test/report?session_id=grader-42"
+# -> 200 {"session_id": "grader-42",
+#         "coverage": {"code": {"covered": 1234, "total": 2100, "basis": "line coverage of app/ ..."}}}
+```
+
+| Status | When | `source` |
+|---|---|---|
+| `400` | Not a JSON object, empty or missing `session_id`, `setup` not an object, no `session_id` query | `tester` |
+| `404` | Unknown session (also after an API restart) | `tester` |
+| `409` | `session_id` already used, another setup still in progress, or report before setup finished | `tester` |
+| `500` | The reset failed (for example, the database is down) | `system` |
+
+Every error body is `{"message", "source"}`. One session is active at a time; a new setup ends
+the previous one, and its report stays readable with the numbers it had at that moment. Coverage
+counts only the API process (not the worker), so it can be lower than the figure from section 3.
+If it can't be measured, `covered` and `total` are `null` with the reason in `basis`.
+
 ## 2. Testing a podmate's service (us)
 
 `tests/contract/` is a black-box suite that talks only HTTP to the Section 5 contract, so it runs
@@ -103,6 +137,11 @@ system-model coverage. **Code coverage of their service is theirs to measure**: 
 their server under coverage (as in section 3) during our run and share the figure.
 
 ## 3. Measuring server-side code coverage
+
+`GET /test/report` (section 1a) gives per-session numbers for the API process without a restart.
+The deployed test stack builds with `INSTALL_COVERAGE=true` for that. For a combined API + worker
+figure, use the compose override below instead. Under it, `/test/report` returns `null` and
+points here, because two coverage measurements can't share a process.
 
 When a podmate runs their suite against our test deployment, measure which of our code it reached
 by running the API and worker under `coverage` (installed in the dev image):
