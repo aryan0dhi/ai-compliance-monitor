@@ -23,6 +23,7 @@ final, because cross-team tests depend on them.
 | D-14 | Ledger hash algorithm, and which reads are logged | Decided (team); **pod** to confirm for re-verification |
 | D-15 | Webhook delivery semantics (fan-out, retries, signature, SSRF rules) | Interim, **pod** |
 | D-16 | Test environment: shared clock, reset scope, fixtures | Interim, **pod** (with D-07) |
+| D-17 | AC-01 cadence: what happens to a sample more than 10 s off schedule | Interim, **pod** |
 
 ## Agenda for the next pod meeting
 
@@ -295,6 +296,22 @@ in `app/modules/ledger/chain.py`, reimplemented in `scripts/verify_ledger_export
   the clock offset back to 0. Accounts and API keys are kept, so testers' keys keep working.
 - **Fixtures.** Taken from the spec's examples (Section 5.2 system id, Model 5 loan-scorer and
   resume-ranker, AC-03 drift > 0.30) until the pod agrees a shared format (D-07).
+
+## D-17: AC-01 cadence tolerance (REQ-01, AC-01, REQ-02)
+
+**Gap.** AC-01 expects a sample every 5 min ± 10 s for an hour, checked from the timestamp log.
+It doesn't say what the service does when a sample is more than 10 s off: nothing in Section 5
+flags it, and a monitoring gap needs 3 missed intervals (D-11).
+
+**Interim decision.** A sample more than 10 s off schedule is a *cadence violation* reported by
+the AC-01 check over the `received_at` log (`tests/contract/cadence.py`), not by the service.
+The boundary is inclusive: an interval of 290–310 s passes, anything outside fails. The service
+stores the sample normally and opens no gap. Tests: `tests/test_ac01_cadence.py`,
+`tests/integration/test_ac01_cadence_pg.py`, and the contract test
+`test_ac01_one_hour_at_the_sampling_interval_opens_no_gap`.
+
+**To agree.** Whether the service itself should flag late or early samples (an event or ledger
+entry), and whether ±10 s should be a per-system setting like `gap_missed_intervals`.
 
 ## Other notes
 
