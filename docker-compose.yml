@@ -64,5 +64,26 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # Tester service of the course testing interface (docs/cross-team-testing.md section 2a).
+  # Not started by default: `docker compose --profile tester up -d tester`. It needs dev
+  # dependencies (pytest) and the contract suite, and keys for the target's /v1 API.
+  tester:
+    profiles: ["tester"]
+    build:
+      context: .
+      args:
+        INSTALL_DEV: "true"
+    command: ["uvicorn", "tester.main:app", "--host", "0.0.0.0", "--port", "8100"]
+    environment:
+      CONTRACT_SYSTEM_KEY: ${CONTRACT_SYSTEM_KEY:-}
+      CONTRACT_VIEWER_KEY: ${CONTRACT_VIEWER_KEY:-}
+      CONTRACT_ADMIN_KEY: ${CONTRACT_ADMIN_KEY:-}
+      CONTRACT_WEBHOOKS: ${CONTRACT_WEBHOOKS:-off}
+    ports:
+      - "127.0.0.1:${TESTER_HOST_PORT:-8100}:8100"
+    volumes:
+      - ./tester:/srv/tester
+      - ./tests:/srv/tests
+
 volumes:
   pgdata:

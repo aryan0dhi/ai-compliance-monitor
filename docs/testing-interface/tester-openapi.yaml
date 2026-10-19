@@ -1,0 +1,161 @@
+openapi: 3.1.1
+info:
+  title: AI Compliance Monitor - tester service
+  version: 1.0.0
+  description: |
+    The tester side of the course cross-team testing interface. It sets up a session on a
+    target system (that system's POST /test/setup), runs our pod contract suite
+    (tests/contract) against the target's /v1 API, and reports per-test results with code,
+    component and system coverage. Served separately from the system (`uvicorn
+    tester.main:app`; under /tester on the test deployment). See docs/cross-team-testing.md.
+
+    No API key is needed to call the tester. The tester's own keys for the target's /v1 API are
+    configured on the tester (CONTRACT_* variables or TESTER_TARGETS_FILE), never sent in a URL.
+    Sessions and reports are kept in memory until the tester stops.
+paths:
+  /test/setup:
+    post:
+      operationId: setupTesterSession
+      summary: Create a session and set up the target system
+      description: |
+        Generates a session id (UUID) and calls the target's POST /test/setup with
+        {"session_id", "setup": {}}, waiting until the target is ready. A target error is
+        forwarded with its status, message and source; if the target can't be reached the
+        source is "communication". A failed setup creates no session.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target_url]
+              properties:
+                target_url:
+                  type: string
+                  format: uri
+                  description: The system's base URL (http or https)
+      responses:
+        "201":
+          description: Session created and target ready
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [session_id]
+                properties:
+                  session_id:
+                    type: string
+                    format: uuid
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+  /test/run:
+    post:
+      operationId: runTesterSession
+      summary: Run the planned tests against the target, then store and return the report
+      description: |
+        Runs every planned test in order, then reads the target's GET /test/report for code
+        coverage. A second or concurrent run of the same session gets 409. If the run aborts,
+        the results so far are stored (GET /test/report) and the answer is 500 with source
+        "tester".
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session_id]
+              properties:
+                session_id:
+                  type: string
+                  minLength: 1
+      responses:
+        "200":
+          description: The full report
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TesterReport" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+  /test/report:
+    get:
+      operationId: getTesterReport
+      summary: The stored report, unchanged (never runs tests)
+      parameters:
+        - name: session_id
+          in: query
+          required: true
+          schema: { type: string, minLength: 1 }
+      responses:
+        "200":
+          description: The stored report
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TesterReport" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409":
+          description: The suite hasn't finished for this session
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+components:
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    Error:
+      type: object
+      required: [message, source]
+      properties:
+        message: { type: string, minLength: 1 }
+        source: { $ref: "#/components/schemas/Source" }
+    Source:
+      enum: [tester, system, communication, unknown]
+    TestResult:
+      type: object
+      required: [test_id, outcome, message]
+      properties:
+        test_id: { type: string, minLength: 1, description: Unique within the report }
+        outcome: { enum: [pass, fail, error, skip] }
+        message: { type: string, minLength: 1 }
+        source: { $ref: "#/components/schemas/Source" }
+      if:
+        properties: { outcome: { const: error } }
+      then:
+        required: [source]
+    CoverageEntry:
+      description: covered <= total, or both null when not measured
+      type: object
+      required: [covered, total, basis]
+      properties:
+        covered: { type: [integer, "null"], minimum: 0 }
+        total: { type: [integer, "null"], minimum: 0 }
+        basis: { type: string, minLength: 1 }
+    TesterReport:
+      type: object
+      required: [session_id, target_url, results, coverage]
+      properties:
+        session_id: { type: string, minLength: 1 }
+        target_url: { type: string, minLength: 1 }
+        finished_at: { type: string, format: date-time }
+        aborted:
+          type: [string, "null"]
+          description: Why the run stopped early, or null
+        results:
+          type: array
+          description: Each planned test exactly once, in run order
+          items: { $ref: "#/components/schemas/TestResult" }
+        coverage:
+          type: object
+          required: [code, component, system]
+          properties:
+            code: { $ref: "#/components/schemas/CoverageEntry" }
+            component: { $ref: "#/components/schemas/CoverageEntry" }
+            system: { $ref: "#/components/schemas/CoverageEntry" }

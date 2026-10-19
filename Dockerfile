@@ -34,6 +34,8 @@ COPY alembic.ini ./
 COPY alembic ./alembic
 COPY scripts ./scripts
 COPY tests ./tests
+# Tester service (uvicorn tester.main:app); only usable in dev images, which have pytest.
+COPY tester ./tester
 
 RUN useradd --create-home --uid 1000 appuser && chmod +x scripts/*.sh
 USER appuser

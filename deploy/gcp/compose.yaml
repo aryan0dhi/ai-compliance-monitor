@@ -61,6 +61,23 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # Tester service of the course testing interface, served at https://SITE_ADDRESS/tester. It
+  # runs the contract suite, so it needs a dev image (pytest). Keys for the target's /v1 API:
+  # CONTRACT_SYSTEM_KEY / CONTRACT_VIEWER_KEY / CONTRACT_ADMIN_KEY in .env (issue-keys.sh), or
+  # per target in TESTER_TARGETS_FILE. Webhook checks are off: nothing here is reachable from a
+  # target's webhook delivery (docs/cross-team-testing.md section 2a).
+  tester:
+    build:
+      context: ../..
+      args:
+        INSTALL_DEV: "true"
+    image: compliance-monitor-tester:latest
+    command: ["uvicorn", "tester.main:app", "--host", "0.0.0.0", "--port", "8100", "--proxy-headers"]
+    env_file: .env
+    environment:
+      CONTRACT_WEBHOOKS: "off"
+    restart: unless-stopped
+
   # Public entry point: automatic Let's Encrypt certificate for SITE_ADDRESS.
   caddy:
     image: caddy:2.8.4-alpine

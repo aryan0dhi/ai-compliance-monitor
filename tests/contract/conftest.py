@@ -37,25 +37,7 @@ from typing import Any
 import httpx
 import pytest
 
-# --- what there is to cover (Phase 3 scope, Section 6.1) -----------------------------------------
-
-PHASE3_REQS = ["REQ-01", "REQ-02", "REQ-03", "REQ-04", "REQ-05", "REQ-06", "REQ-13", "REQ-14"]
-PHASE3_ACS = ["AC-01", "AC-02", "AC-03", "AC-04", "AC-06", "AC-15"]
-ENDPOINTS = [
-    "POST /v1/metrics",
-    "GET /v1/events",
-    "GET /v1/events/{id}",
-    "GET /v1/events/{id}/audit",
-    "GET /v1/ledger/export",
-    "GET /v1/ledger/verify",
-    "POST /v1/webhooks",
-    "POST /v1/test/clock/advance",
-    "POST /v1/test/reset",
-]
-# Model 1 elements reachable in Phase 3 (monitoring states, gap path, denial).
-MODEL1 = ["FLAGGED", "DENIED", "GAP_OPEN", "REVIEWER_NOTIFIED", "GAP_CLOSED"]
-# Model 4 invariants checkable through the API in Phase 3.
-MODEL4 = ["INV-7", "INV-8", "INV-10", "INV-12", "INV-13"]
+from tests.contract.scope import ENDPOINTS, MODEL1, MODEL4, PHASE3_ACS, PHASE3_REQS
 
 
 def pytest_configure(config):
@@ -117,6 +99,13 @@ def target() -> Target:
     )
 
 
+class TargetServerError(Exception):
+    """The service answered 5xx. No check expects one, so it is an error of the system under
+    test, not a failed assertion (the tester service reports it with source "system")."""
+
+    error_source = "system"
+
+
 class Api:
     def __init__(self, target: Target) -> None:
         self.target = target
@@ -126,7 +115,10 @@ class Api:
         headers = kwargs.pop("headers", {})
         if as_ is not None:
             headers["Authorization"] = f"Bearer {self.target.keys[as_]}"
-        return self.http.request(method, path, headers=headers, **kwargs)
+        resp = self.http.request(method, path, headers=headers, **kwargs)
+        if resp.status_code >= 500:
+            raise TargetServerError(f"{method} {path} -> {resp.status_code}: {resp.text[:300]}")
+        return resp
 
     def wait_for(self, check: Callable[[], Any], what: str) -> Any:
         deadline = time.monotonic() + self.target.wait_s

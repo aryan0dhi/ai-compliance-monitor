@@ -2,7 +2,14 @@
 # it from the VM's static IP); Caddy obtains and renews the certificate itself.
 {$SITE_ADDRESS} {
 	encode gzip
-	reverse_proxy api:8000
+	# Tester service (course testing interface); the prefix is stripped, so /tester/test/run
+	# reaches the tester's /test/run.
+	handle_path /tester/* {
+		reverse_proxy tester:8100
+	}
+	handle {
+		reverse_proxy api:8000
+	}
 	header {
 		Strict-Transport-Security "max-age=31536000"
 		X-Content-Type-Options "nosniff"
