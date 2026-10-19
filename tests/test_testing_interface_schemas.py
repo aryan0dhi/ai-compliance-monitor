@@ -52,7 +52,10 @@ def _system_app():
     return app
 
 
-def _tester_app():
+@pytest.fixture
+def tester_doubles():
+    """Installed per test: tester.main.app is shared with tests/test_tester.py, whose fixture
+    clears its overrides afterwards."""
     import httpx
 
     target, sessions = Target(), tester_main.Sessions()
@@ -61,21 +64,24 @@ def _tester_app():
         with httpx.Client(transport=httpx.MockTransport(target.handle)) as c:
             yield c
 
-    app = tester_main.app
-    app.dependency_overrides.update(
+    overrides = tester_main.app.dependency_overrides
+    saved = dict(overrides)
+    overrides.update(
         {
             tester_main.get_sessions: lambda: sessions,
             tester_main.get_target_client: client,
             tester_main.get_runner: lambda: lambda target_url, overrides: scripted_run(),
         }
     )
-    return app
+    yield
+    overrides.clear()
+    overrides.update(saved)
 
 
 system_schema = _load("system-openapi.yaml")
 system_schema.app = _system_app()
 tester_schema = _load("tester-openapi.yaml")
-tester_schema.app = _tester_app()
+tester_schema.app = tester_main.app
 
 
 @pytest.fixture
@@ -93,5 +99,5 @@ def test_system_testing_interface_conforms(case, no_database_reset):
 @pytest.mark.fuzz
 @tester_schema.parametrize()
 @FUZZ
-def test_tester_conforms(case):
+def test_tester_conforms(case, tester_doubles):
     case.call_and_validate()
