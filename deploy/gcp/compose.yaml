@@ -27,6 +27,8 @@ services:
       context: ../..
       args:
         INSTALL_DEV: "false"
+        # Test deployment: GET /test/report measures code coverage (D-19).
+        INSTALL_COVERAGE: "true"
     image: compliance-monitor:latest
     env_file: .env
     environment:

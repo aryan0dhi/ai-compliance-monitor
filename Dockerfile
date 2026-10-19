@@ -10,6 +10,9 @@ WORKDIR /srv
 
 # Set to "true" for local development / CI images (adds pytest, httpx, ruff).
 ARG INSTALL_DEV=false
+# Set to "true" for a cross-team test deployment, so GET /test/report can measure code coverage
+# (dev images already include it).
+ARG INSTALL_COVERAGE=false
 
 COPY pyproject.toml ./
 COPY app ./app
@@ -21,6 +24,8 @@ RUN pip install --upgrade "pip>=26.2"
 # Trivy scan. Dev images keep it for pip-audit and ad-hoc installs.
 RUN if [ "$INSTALL_DEV" = "true" ]; then \
         pip install ".[dev]"; \
+    elif [ "$INSTALL_COVERAGE" = "true" ]; then \
+        pip install ".[coverage]" && pip uninstall --yes pip; \
     else \
         pip install . && pip uninstall --yes pip; \
     fi

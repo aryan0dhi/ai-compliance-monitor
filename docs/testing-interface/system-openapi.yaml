@@ -1,0 +1,148 @@
+openapi: 3.1.1
+info:
+  title: AI Compliance Monitor - system testing interface
+  version: 1.0.0
+  description: |
+    The system side of the course cross-team testing interface: a tester (or a grader) sets up a
+    session, runs its tests against the pod's /v1 project API, then reads this system's code
+    coverage for that session. Served at the system's base URL, next to /v1, only in the test
+    environment (404 in production). See docs/cross-team-testing.md and spec-decisions.md D-19.
+
+    No API key is needed for these two operations; the /v1 project API still needs one (keys
+    are sent privately). One session is active at a time: a new setup ends the active one and
+    freezes its report. Sessions are kept in memory until the API restarts.
+paths:
+  /test/setup:
+    post:
+      operationId: setupTestSession
+      summary: Prepare the system for a test session
+      description: |
+        Resets the test environment to the baseline fixtures (as POST /v1/test/reset), sets the
+        test clock back to real time and restarts code-coverage measurement. Returns once the
+        system is ready. `setup` is accepted but doesn't select fixtures yet (D-07); only the
+        baseline fixtures exist.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetupRequest"
+      responses:
+        "201":
+          description: Session ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionCreated"
+        "400":
+          $ref: "#/components/responses/Error"
+        "409":
+          description: The session_id was already used, or another setup is in progress
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Preparing the system failed (source is "system")
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /test/report:
+    get:
+      operationId: getTestSessionReport
+      summary: Code coverage of the project requests made since the session's setup
+      description: Reading a report never changes it.
+      parameters:
+        - name: session_id
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        "200":
+          description: The session's report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemReport"
+        "400":
+          $ref: "#/components/responses/Error"
+        "404":
+          description: Unknown session (or the API restarted since its setup)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Setup is still in progress
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+components:
+  responses:
+    Error:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+  schemas:
+    SetupRequest:
+      type: object
+      required: [session_id]
+      properties:
+        session_id:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Supplied by the tester or grader; unique per session
+        setup:
+          type: object
+          description: Initial state requested by the tester (currently ignored, D-07)
+    SessionCreated:
+      type: object
+      required: [session_id]
+      properties:
+        session_id:
+          type: string
+          minLength: 1
+    SystemReport:
+      type: object
+      required: [session_id, coverage]
+      properties:
+        session_id:
+          type: string
+          minLength: 1
+        coverage:
+          type: object
+          required: [code]
+          properties:
+            code:
+              $ref: "#/components/schemas/CoverageEntry"
+    CoverageEntry:
+      description: covered <= total, or both null when not measured (never 0 instead)
+      type: object
+      required: [covered, total, basis]
+      properties:
+        covered:
+          type: [integer, "null"]
+          minimum: 0
+        total:
+          type: [integer, "null"]
+          minimum: 0
+        basis:
+          type: string
+          minLength: 1
+          description: What was measured, or why nothing was
+    Error:
+      type: object
+      required: [message, source]
+      properties:
+        message:
+          type: string
+          minLength: 1
+        source:
+          enum: [tester, system, communication, unknown]
