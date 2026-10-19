@@ -24,6 +24,7 @@ final, because cross-team tests depend on them.
 | D-15 | Webhook delivery semantics (fan-out, retries, signature, SSRF rules) | Interim, **pod** |
 | D-16 | Test environment: shared clock, reset scope, fixtures | Interim, **pod** (with D-07) |
 | D-17 | AC-01 cadence: what happens to a sample more than 10 s off schedule | Interim, **pod** |
+| D-18 | AC-05 checkpoints: calendar 5mo29d can fall after the 6-month minimum | Open, **pod** |
 
 ## Agenda for the next pod meeting
 
@@ -312,6 +313,23 @@ stores the sample normally and opens no gap. Tests: `tests/test_ac01_cadence.py`
 
 **To agree.** Whether the service itself should flag late or early samples (an event or ledger
 entry), and whether ±10 s should be a per-system setting like `gap_missed_intervals`.
+
+## D-18: AC-05 checkpoints vs calendar months (REQ-05, AC-05, INV-10)
+
+**Conflict.** AC-05 expects a record to be retrievable at 5 months 29 days and allows it to be
+gone at 6 months 1 day. `retain_until` is detection + 6 calendar months, clamped to month end
+(PostgreSQL's `interval '6 months'`). Counted the same way, 5mo29d can fall *after*
+`retain_until` when the last month spans February. Example: detected 2026-09-27 20:00 gives
+`retain_until` 2027-03-27 20:00, while +5mo29d and +6mo1d are both 2027-03-28 20:00.
+
+**Today.** Nothing purges data (Phase 5), so the record is retrievable at every checkpoint.
+`tests/integration/test_ac05_retention_pg.py` checks the literal 5mo29d, `retain_until` − 1 day
+and `retain_until`, and accepts present or absent at 6mo1d. A purge that deletes exactly at
+`retain_until` would therefore fail AC-05 for dates like the example.
+
+**To agree.** Either read AC-05's "5mo29d" as "the day before `retain_until`" (the purge can
+run at `retain_until`), or keep the literal reading and have the purge wait until at least
+6mo1d.
 
 ## Other notes
 
