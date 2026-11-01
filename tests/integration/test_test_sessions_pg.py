@@ -15,7 +15,7 @@ from app.modules.events.models import Event
 from app.modules.metrics.models import MetricSample
 from app.modules.systems.models import MonitoredSystem
 from app.modules.testing.clock import SimulatedClock, get_simulated_clock
-from app.modules.testing.fixtures import BASELINE_SYSTEMS
+from app.modules.testing.fixtures import baseline_systems
 from app.modules.testing.sessions import TestSessions, get_test_sessions
 from tests.test_test_sessions import FakeMeter
 
@@ -28,7 +28,7 @@ def test_setup_resets_to_the_baseline_and_report_follows_the_session(
     monkeypatch.setattr(service, "get_settings", lambda: Settings(enable_test_routes=True))
     make_uow = lambda: SqlAlchemyUnitOfWork(pg_sessionmaker)  # noqa: E731
     admin = create_user(make_uow(), name="tester", role=Role.ADMIN)
-    loan = BASELINE_SYSTEMS[0]
+    loan = baseline_systems()[0]
     seed(loan.id)
     metric = {
         "system_id": str(loan.id),

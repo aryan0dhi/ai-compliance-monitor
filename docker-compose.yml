@@ -36,6 +36,7 @@ services:
       - ./app:/srv/app
       - ./alembic:/srv/alembic
       - ./tests:/srv/tests
+      - ./docs:/srv/docs:ro
     depends_on:
       db:
         condition: service_healthy
@@ -59,6 +60,7 @@ services:
       POSTGRES_PORT: "5432"
     volumes:
       - ./app:/srv/app
+      - ./docs:/srv/docs:ro
     depends_on:
       api:
         condition: service_healthy

@@ -30,7 +30,8 @@ from app.modules.notifications.outbox import OutboxNotifier
 from app.modules.notifications.router import get_webhook_sender
 from app.modules.systems.models import MonitoredSystem
 from app.modules.testing.clock import SimulatedClock, get_simulated_clock
-from app.modules.testing.fixtures import BASELINE_SYSTEMS
+from app.modules.testing.fixtures import baseline_systems
+from app.modules.thresholds.models import ThresholdVersion
 from app.modules.worker.runner import Worker, leadership, read_heartbeat, record_heartbeat
 from tests.conftest import T0
 from tests.fakes import FixedClock, RecordingSender, system_principal, user_principal
@@ -312,16 +313,48 @@ class TestTestEnvironment:
         for model in (Event, MetricSample, LedgerEntry, Notification):
             assert count(pg_sessionmaker, model) == 0
         with pg_sessionmaker() as s:
-            assert s.get(MonitoredSystem, system_id).last_seen_at is None
-            for fixture in BASELINE_SYSTEMS:
+            assert s.get(MonitoredSystem, system_id) is None  # not a fixture system
+            for fixture in baseline_systems():
                 assert s.get(MonitoredSystem, fixture.id).name == fixture.name
         with make_uow() as uow:
             assert uow.auth.principal_for_key(hash_api_key(issued.api_key)) is not None
-            loan = BASELINE_SYSTEMS[0]
+            loan = baseline_systems()[0]
             accuracy = uow.thresholds.in_force(loan.id, "accuracy", T0)
             assert (accuracy.direction, accuracy.limit_value) == ("below", Decimal("0.70"))
         assert SimulatedClock(pg_sessionmaker).offset_seconds() == 0
         service.reset_test_environment(make_uow())  # idempotent
+
+    def test_reset_leaves_exactly_the_fixture_systems_and_thresholds(
+        self, make_uow, seed, pg_sessionmaker, monkeypatch
+    ):
+        from app.modules.testing import service
+
+        monkeypatch.setattr(service, "get_settings", lambda: Settings(enable_test_routes=True))
+        seed()  # unreferenced: removed
+        keyed, _, _ = seed()
+        create_user(make_uow(), name="keyed", role=Role.SYSTEM, system_id=keyed)
+
+        service.reset_test_environment(make_uow())
+
+        fixtures = baseline_systems()
+        with pg_sessionmaker() as s:
+            systems = {m.id: m for m in s.scalars(select(MonitoredSystem))}
+            assert set(systems) == {f.id for f in fixtures} | {keyed}  # a keyed one stays
+            for f in fixtures:
+                assert (systems[f.id].name, systems[f.id].sampling_interval_s) == (
+                    f.name,
+                    f.sampling_interval_s,
+                )
+                assert systems[f.id].gap_missed_intervals == f.gap_missed_intervals
+            thresholds = {
+                (t.system_id, t.metric_name, t.metric_type, t.direction, t.limit_value)
+                for t in s.scalars(select(ThresholdVersion))
+            }
+        assert thresholds == {
+            (f.id, t.metric_name, t.metric_type.value, t.direction.value, t.limit_value)
+            for f in fixtures
+            for t in f.thresholds
+        }
 
     def test_simulated_clock_is_shared_across_processes(self, pg_sessionmaker):
         api, worker = (
@@ -491,7 +524,7 @@ def test_test_routes_over_http(pg_sessionmaker, seed, monkeypatch):
     assert client.get("/v1/test/clock", headers=headers).json()["offset_seconds"] == 0
     # The admin key survived the reset; fixture systems exist.
     with pg_sessionmaker() as s:
-        assert s.get(MonitoredSystem, BASELINE_SYSTEMS[0].id) is not None
+        assert s.get(MonitoredSystem, baseline_systems()[0].id) is not None
     # Building the app does not swap the global clock; only the server lifespan installs it.
     assert isinstance(get_clock(), SystemClock)
 

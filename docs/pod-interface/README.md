@@ -151,9 +151,11 @@ deployment provides.
 
 ### Repeatable testing
 
-- **B-20 Standard fixtures (Proposed, D-16).** After `POST /v1/test/reset` every implementation
-  holds exactly these systems and thresholds and nothing else. Thresholds apply to samples
-  timestamped after 2000-01-01T00:00:00Z.
+- **B-20 Standard fixtures (Proposed, D-16).** [fixtures.json](fixtures.json) is the source: copy
+  that file, don't retype the table. After `POST /v1/test/reset` every implementation holds
+  exactly these systems and thresholds and nothing else, except that a system an account still
+  points to stays, without thresholds. Thresholds apply to samples timestamped after
+  2000-01-01T00:00:00Z.
 
   | System | `system_id` | Interval | Gap after | Metric | Type | Breaches when |
   |---|---|---|---|---|---|---|
@@ -161,7 +163,7 @@ deployment provides.
   | loan-scorer | same | | | `drift_score` | drift | `> 0.30` |
   | resume-ranker | `550e8400-e29b-41d4-a716-446655440001` | 300 s | 3 intervals | `psi` | drift | `> 0.30` |
 
-  Reset also removes all events, samples, webhooks, notifications, dispositions, reports and
+  A test checks that this table matches the file. Reset also removes all events, samples, webhooks, notifications, dispositions, reports and
   ledger entries, and sets the simulated clock back to real time. API keys stay valid.
 - **B-21 Settle time (Proposed).** Asynchronous effects (gap events, webhook deliveries,
   reminders, time-driven state changes) MUST be observable within **30 seconds of real time**

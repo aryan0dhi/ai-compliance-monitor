@@ -21,7 +21,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Runs when the server starts (not in unit tests, which don't enter the lifespan).
         if test_routes:
             from app.modules.testing.clock import install_simulated_clock
+            from app.modules.testing.fixtures import baseline_systems
 
+            baseline_systems()  # fail at startup, not on the first reset
             install_simulated_clock()
         yield
 

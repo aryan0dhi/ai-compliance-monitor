@@ -2,6 +2,7 @@
 
 from enum import StrEnum
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -22,6 +23,8 @@ class Settings(BaseSettings):
 
     # /v1/test/* routes (pod contract, Section 5). Must stay off in production.
     enable_test_routes: bool = False
+    # Standard fixtures reseeded by /v1/test/reset (B-20); the default is the source tree's copy.
+    fixtures_path: Path = Path(__file__).resolve().parents[2] / "docs/pod-interface/fixtures.json"
 
     # PostgreSQL. Either set DATABASE_URL directly, or the individual POSTGRES_* parts
     # (Lightsail managed databases expose host/port/user/password separately).

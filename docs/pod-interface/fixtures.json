@@ -1,0 +1,26 @@
+{
+  "status": "proposed",
+  "version": 1,
+  "valid_from": "2000-01-01T00:00:00Z",
+  "systems": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "name": "loan-scorer",
+      "sampling_interval_s": 300,
+      "gap_missed_intervals": 3,
+      "thresholds": [
+        {"metric_name": "accuracy", "metric_type": "performance", "direction": "below", "limit": "0.70"},
+        {"metric_name": "drift_score", "metric_type": "drift", "direction": "above", "limit": "0.30"}
+      ]
+    },
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440001",
+      "name": "resume-ranker",
+      "sampling_interval_s": 300,
+      "gap_missed_intervals": 3,
+      "thresholds": [
+        {"metric_name": "psi", "metric_type": "drift", "direction": "above", "limit": "0.30"}
+      ]
+    }
+  ]
+}
