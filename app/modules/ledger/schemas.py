@@ -1,11 +1,10 @@
 """Response bodies for /v1/ledger/* and /v1/events/{event_id}/audit (Section 5.1)."""
 
 from typing import Any
-from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from app.core.types import UtcDatetime
+from app.core.types import IdOut, UtcDatetime
 from app.modules.ledger.chain import VerifyResult, format_timestamp
 from app.modules.ledger.models import LedgerEntry
 from app.modules.ledger.service import LedgerPage
@@ -20,8 +19,8 @@ HASH_ALGORITHM = (
 class LedgerEntryOut(BaseModel):
     seq: int
     entry_type: str
-    event_id: UUID | None
-    actor_id: UUID | None
+    event_id: IdOut | None
+    actor_id: IdOut | None
     # Exactly the string that was hashed (UTC, microseconds, "+00:00").
     at: str
     payload: dict[str, Any]
@@ -76,7 +75,7 @@ class LedgerVerifyOut(BaseModel):
 
 
 class AuditEntryOut(BaseModel):
-    actor_id: UUID | None = Field(description="null for actions taken by the background worker")
+    actor_id: IdOut | None = Field(description="null for actions taken by the background worker")
     action: str
     timestamp: UtcDatetime
     seq: int

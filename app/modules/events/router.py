@@ -1,11 +1,16 @@
 """GET /v1/events and GET /v1/events/{event_id}. HTTP mapping only; logic in events.service."""
 
 from typing import Annotated
-from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.core.types import INTEGER_QUERY, IsoAwareDatetime
+from app.core.types import (
+    ID_MAX_LENGTH,
+    ID_PATTERN,
+    INTEGER_QUERY,
+    IsoAwareDatetime,
+    to_internal_id,
+)
 from app.db.uow import UnitOfWork, get_uow
 from app.modules.auth.interface import Principal, get_principal
 from app.modules.events.models import EventState, EventType
@@ -32,7 +37,7 @@ MAX_OFFSET = 2**63 - 1
     },
 )
 def list_events_route(
-    system_id: UUID | None = None,
+    system_id: Annotated[str, Query(pattern=ID_PATTERN, max_length=ID_MAX_LENGTH)] | None = None,
     state: EventState | None = None,
     event_type: EventType | None = Query(None, alias="type"),
     since: IsoAwareDatetime | None = Query(None, description="Only events detected at or after"),
@@ -41,7 +46,14 @@ def list_events_route(
     principal: Principal = Depends(get_principal),
     uow: UnitOfWork = Depends(get_uow),
 ) -> EventPageOut:
-    filters = EventFilters(system_id=system_id, state=state, type=event_type, since=since)
+    internal_id = to_internal_id(system_id) if system_id is not None else None
+    filters = EventFilters(
+        system_id=internal_id,
+        state=state,
+        type=event_type,
+        since=since,
+        match_nothing=system_id is not None and internal_id is None,
+    )
     try:
         page = list_events(filters, limit=limit, offset=offset, principal=principal, uow=uow)
     except EventAccessDenied as exc:
@@ -64,11 +76,10 @@ def get_event_route(
     uow: UnitOfWork = Depends(get_uow),
     ledger: LedgerWriter = Depends(get_ledger),
 ) -> EventDetail:
-    # A malformed id can't name an existing event, so it is a 404 like any unknown id (D-06).
-    try:
-        parsed_id = UUID(event_id)
-    except ValueError as exc:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "event not found") from exc
+    # An id that is not an event's canonical id can't name an event: 404 like any unknown id (D-06).
+    parsed_id = to_internal_id(event_id)
+    if parsed_id is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "event not found")
     try:
         event = get_event(parsed_id, principal=principal, uow=uow, ledger=ledger)
     except EventAccessDenied as exc:

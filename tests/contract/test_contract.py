@@ -8,7 +8,6 @@ import copy
 import importlib.util
 import os
 import time
-import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -102,7 +101,7 @@ def test_requests_without_a_valid_key_are_401(api, method, path, header):
 @covers(reqs=["REQ-13"], endpoints=["POST /v1/metrics", "GET /v1/events"], model1=["DENIED"])
 def test_roles_are_enforced(api):
     assert send(api, 0.1, as_="viewer")[0].status_code == 403  # humans don't submit metrics
-    other = str(uuid.uuid4())
+    other = "contract-other-system"
     assert send(api, 0.1, system_id=other)[0].status_code == 403  # key scoped to its system
     assert api.call("GET", "/v1/events", as_="system").status_code == 403
 
@@ -172,7 +171,9 @@ def test_listing_filters_by_system_and_type(api, breach):
     page = api.call("GET", "/v1/events", as_="viewer", params=query)
     assert page.status_code == 200, page.text
     assert event_id in {e["event_id"] for e in items(page.json())}
-    none = api.call("GET", "/v1/events", as_="viewer", params={"system_id": str(uuid.uuid4())})
+    none = api.call(
+        "GET", "/v1/events", as_="viewer", params={"system_id": "contract-unknown-system"}
+    )
     assert items(none.json()) == []
 
 

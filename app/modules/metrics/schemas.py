@@ -7,13 +7,20 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, StrictFloat, StrictInt, field_validator
 
-from app.core.types import METRIC_NAME_PATTERN, IsoAwareDatetime, JsonDecimal, UtcDatetime
+from app.core.types import (
+    METRIC_NAME_PATTERN,
+    IdOut,
+    IsoAwareDatetime,
+    JsonDecimal,
+    OpaqueId,
+    UtcDatetime,
+)
 from app.modules.metrics.models import MetricType
 from app.modules.metrics.service import IngestResult, MetricSubmission
 
 
 class MetricSampleIn(BaseModel):
-    system_id: UUID
+    system_id: OpaqueId
     # No leading/trailing whitespace: "drift_score " would be a different metric that silently
     # never matches its threshold, hiding breaches (REQ-03). No control characters:
     # PostgreSQL text rejects NUL, and the rest enable log injection.
@@ -45,11 +52,12 @@ class MetricSampleIn(BaseModel):
             raise ValueError("timestamp is out of range") from exc
 
     def to_submission(self) -> MetricSubmission:
+        """Call after `authorize_submission`, which guarantees system_id is a canonical UUID."""
         # repr() of a float is its shortest round-trip form, so 0.3 becomes Decimal("0.3"),
         # not 0.299999...; this keeps the AC-03 at-threshold boundary exact.
         value = Decimal(repr(self.value)) if isinstance(self.value, float) else Decimal(self.value)
         return MetricSubmission(
-            system_id=self.system_id,
+            system_id=UUID(self.system_id),
             metric_name=self.metric_name,
             metric_type=self.metric_type,
             value=value,
@@ -58,13 +66,13 @@ class MetricSampleIn(BaseModel):
 
 
 class MetricSampleOut(BaseModel):
-    system_id: UUID
+    system_id: IdOut
     metric_name: str
     metric_type: MetricType
     value: JsonDecimal
     timestamp: UtcDatetime
     # Present only when this metric breached its threshold (Section 5.1).
-    flagged_event_id: UUID | None = None
+    flagged_event_id: IdOut | None = None
 
     @classmethod
     def from_result(cls, result: IngestResult) -> "MetricSampleOut":

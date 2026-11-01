@@ -46,7 +46,10 @@ deployment provides.
   body, so an unauthenticated malformed request is `401`. `403` for the wrong role or system
   scope. `404` for an event id that names no event, malformed ids included. `409` for state
   conflicts. `422` only when a webhook URL is refused or fails verification. Errors are
-  `{"detail": ...}` and never echo raw input.
+  `{"detail": ...}` and never echo raw input. Ids are opaque strings of 1-64 characters from
+  `[A-Za-z0-9._~-]`, not UUIDs. A well-formed `system_id` filter that names no system gives an
+  empty `200`; a body `system_id` that is not the key's own is `403`; an id outside the
+  pattern or length is `400`. *Proposed, awaiting pod agreement.*
 - **B-23 Time.** Request times MUST carry an offset (naive times and Unix numbers are `400`);
   responses use UTC. All business time (detection, gap timers, deadlines, reminders, retention)
   comes from the service's clock, which the test clock controls in test deployments.

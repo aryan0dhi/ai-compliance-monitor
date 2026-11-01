@@ -19,6 +19,8 @@ class EventFilters:
     state: EventState | None = None
     type: EventType | None = None
     since: datetime | None = None
+    # system_id names no system (not a UUID), so nothing can match.
+    match_nothing: bool = False
 
 
 class EventRepository(Protocol):

@@ -1,10 +1,9 @@
 """GET /v1/me: the identity behind the presented key (pod interface, docs/pod-interface)."""
 
-from uuid import UUID
-
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
+from app.core.types import IdOut
 from app.modules.auth.interface import Principal, Role, get_principal
 
 router = APIRouter(tags=["discovery"])
@@ -12,9 +11,9 @@ router = APIRouter(tags=["discovery"])
 
 class MeOut(BaseModel):
     # The id audit entries record for this key (AC-15 checks attribution against it).
-    actor_id: UUID
+    actor_id: IdOut
     role: Role
-    system_id: UUID | None = None
+    system_id: IdOut | None = None
 
 
 @router.get(

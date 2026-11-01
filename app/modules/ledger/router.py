@@ -1,11 +1,10 @@
 """GET /v1/ledger/export, GET /v1/ledger/verify, GET /v1/events/{event_id}/audit."""
 
 from typing import Annotated, Any
-from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.core.types import INTEGER_QUERY
+from app.core.types import INTEGER_QUERY, to_internal_id
 from app.db.uow import UnitOfWork, get_uow
 from app.modules.auth.interface import Principal, get_principal
 from app.modules.ledger.schemas import AuditEntryOut, LedgerExportOut, LedgerVerifyOut
@@ -71,10 +70,9 @@ def audit_route(
     principal: Principal = Depends(get_principal),
     uow: UnitOfWork = Depends(get_uow),
 ) -> list[AuditEntryOut]:
-    try:
-        parsed_id = UUID(event_id)
-    except ValueError as exc:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "event not found") from exc
+    parsed_id = to_internal_id(event_id)
+    if parsed_id is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "event not found")
     try:
         entries = event_audit(parsed_id, principal=principal, uow=uow)
     except LedgerAccessDenied as exc:
