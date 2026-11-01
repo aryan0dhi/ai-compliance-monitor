@@ -7,6 +7,7 @@ or a podmate's. Nothing here imports the application. Configure with environment
     CONTRACT_SYSTEM_KEY     monitored-system key for CONTRACT_SYSTEM_ID         (required)
     CONTRACT_VIEWER_KEY     viewer key                                           (required)
     CONTRACT_ADMIN_KEY      admin key (webhooks, /v1/test/*)                     (required)
+    CONTRACT_RESUME_RANKER_KEY  key for the resume-ranker fixture system (Model 5 Ex-2 only)
     CONTRACT_FIXTURES       fixtures file (default docs/pod-interface/fixtures.json, B-20)
     CONTRACT_SYSTEM_ID      default: loan-scorer's id in the fixtures file
     CONTRACT_DRIFT_METRIC / CONTRACT_DRIFT_LIMIT     default: loan-scorer's drift threshold
@@ -39,13 +40,14 @@ import httpx
 import pytest
 
 from tests.contract.fixtures import Fixtures, load_fixtures
-from tests.contract.scope import ENDPOINTS, MODEL1, MODEL4, PHASE3_ACS, PHASE3_REQS
+from tests.contract.scope import ENDPOINTS, MODEL1, MODEL4, MODEL5, PHASE3_ACS, PHASE3_REQS
 
 
 def pytest_configure(config):
     config.addinivalue_line(
         "markers",
-        "covers(reqs, acs, endpoints, model1, model4, decision): what a contract test exercises",
+        "covers(reqs, acs, endpoints, model1, model4, model5, decision): "
+        "what a contract test exercises",
     )
 
 
@@ -93,13 +95,16 @@ def target(fixtures) -> Target:
     loan = fixtures.systems["loan-scorer"]
     drift = fixtures.threshold("loan-scorer", kind="drift")
     perf = fixtures.threshold("loan-scorer", kind="performance")
+    keys = {
+        "system": _env("CONTRACT_SYSTEM_KEY"),
+        "viewer": _env("CONTRACT_VIEWER_KEY"),
+        "admin": _env("CONTRACT_ADMIN_KEY"),
+    }
+    if os.environ.get("CONTRACT_RESUME_RANKER_KEY"):
+        keys["resume_ranker"] = os.environ["CONTRACT_RESUME_RANKER_KEY"]
     return Target(
         base_url=_env("CONTRACT_BASE_URL").rstrip("/"),
-        keys={
-            "system": _env("CONTRACT_SYSTEM_KEY"),
-            "viewer": _env("CONTRACT_VIEWER_KEY"),
-            "admin": _env("CONTRACT_ADMIN_KEY"),
-        },
+        keys=keys,
         system_id=_env("CONTRACT_SYSTEM_ID", loan["id"]),
         drift_metric=_env("CONTRACT_DRIFT_METRIC", drift["metric_name"]),
         drift_limit=float(_env("CONTRACT_DRIFT_LIMIT", drift["limit"])),
@@ -147,6 +152,14 @@ def api(target) -> Iterator[Api]:
     client = Api(target)
     yield client
     client.http.close()
+
+
+@pytest.fixture(scope="session")
+def meta_phases(api) -> list[int]:
+    """Phases the target provides (GET /v1/meta, no key needed)."""
+    resp = api.call("GET", "/v1/meta", as_=None)
+    assert resp.status_code == 200, resp.text
+    return resp.json()["phases"]
 
 
 @pytest.fixture(scope="session")
@@ -231,6 +244,7 @@ def pytest_runtest_makereport(item, call):
                 "test": item.name,
                 "outcome": report.outcome,
                 "detail": str(report.longrepr)[-600:] if report.failed else None,
+                "deferred_steps": dict(item.user_properties).get("deferred_steps"),
                 **tags,
             }
         )
@@ -262,6 +276,7 @@ def pytest_sessionfinish(session, exitstatus):
             "endpoints (component)": _coverage("endpoints", ENDPOINTS),
             "model1_states (system model)": _coverage("model1", MODEL1),
             "model4_invariants (system model)": _coverage("model4", MODEL4),
+            "model5_scenarios (system model)": _coverage("model5", MODEL5),
         },
         "tests": _RESULTS,
     }
@@ -286,6 +301,10 @@ def pytest_sessionfinish(session, exitstatus):
     for r in _RESULTS:
         covers = ", ".join(r.get("reqs", []) + r.get("acs", []))
         lines.append(f"| {r['test']} | {r['outcome']} | {covers} | {r.get('decision') or '-'} |")
+    deferred = [r for r in _RESULTS if r.get("deferred_steps")]
+    if deferred:
+        lines += ["", "## Deferred scenario steps (target phases lack them)", ""]
+        lines += [f"- {r['test']}: {', '.join(r['deferred_steps'])}" for r in deferred]
     failed = [r for r in _RESULTS if r["outcome"] == "failed"]
     if failed:
         lines += ["", "## Failures", ""]

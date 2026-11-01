@@ -197,7 +197,7 @@ Each team adds its deployment to the pod registry with:
 - **Schema conformance:** run Schemathesis (or any OpenAPI fuzzer) with this `openapi.yaml`
   against a deployment, using the team's keys.
 - **Behaviour:** this repository's black-box suite, `tests/contract/`, implements B-01 to B-06,
-  B-13, B-14, B-20 to B-22 over HTTP and writes a coverage report by REQ, AC, endpoint, Model 1
+  B-13, B-14, B-20 to B-22 and B-24 (Model 5 Ex-1, Ex-2 and Ex-4, up to Phase 3) over HTTP and writes a coverage report by REQ, AC, endpoint, Model 1
   state and Model 4 invariant (see [docs/cross-team-testing.md](../cross-team-testing.md)).
 
 ## Decisions for the pod

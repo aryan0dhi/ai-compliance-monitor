@@ -114,7 +114,10 @@ key, and tell them which fixture their system/metrics correspond to.
 ```bash
 export CONTRACT_BASE_URL=https://their-service.example.com
 export CONTRACT_SYSTEM_KEY=... CONTRACT_VIEWER_KEY=... CONTRACT_ADMIN_KEY=...
-# Only if their fixtures differ from ours (defaults shown):
+export CONTRACT_RESUME_RANKER_KEY=...   # system key for resume-ranker (Model 5 Ex-2)
+# Only if their fixtures differ from ours: point at their fixtures file, or override single values
+# (defaults come from docs/pod-interface/fixtures.json):
+export CONTRACT_FIXTURES=their-fixtures.json
 export CONTRACT_SYSTEM_ID=550e8400-e29b-41d4-a716-446655440000
 export CONTRACT_DRIFT_METRIC=drift_score CONTRACT_DRIFT_LIMIT=0.30
 export CONTRACT_PERF_METRIC=accuracy CONTRACT_PERF_LIMIT=0.70
@@ -124,6 +127,9 @@ export CONTRACT_RECEIVER_BIND=0.0.0.0:8099 CONTRACT_RECEIVER_URL=https://<tunnel
 export CONTRACT_REPORT_DIR=reports/contract-<team>-$(date +%F)
 pytest tests/contract -m contract -v
 ```
+
+The Model 5 scenarios (`test_model5_ex*`) run the steps up to the phases in the target's
+`GET /v1/meta`; the later steps are listed as deferred in the report, not skipped.
 
 The run writes `contract-report.md` and `contract-report.json`, and the results log below uses
 them. Each test declares the REQs, ACs, endpoints (**component coverage**), and Model 1 states and
@@ -182,8 +188,8 @@ returns `500` with `tester`, and the results so far are stored: the interrupted 
 `error`/`tester` and the rest are `skip`. Report returns `409` until the run has ended. Every
 error body is `{message, source}`.
 
-**Keys for the target.** The tester's own `CONTRACT_SYSTEM_KEY`, `CONTRACT_VIEWER_KEY` and
-`CONTRACT_ADMIN_KEY` (and the other `CONTRACT_*` settings from section 2) apply to every target.
+**Keys for the target.** The tester's own `CONTRACT_SYSTEM_KEY`, `CONTRACT_VIEWER_KEY`,
+`CONTRACT_ADMIN_KEY` and `CONTRACT_RESUME_RANKER_KEY` (and the other `CONTRACT_*` settings from section 2) apply to every target.
 Per-target values go in a JSON file named by `TESTER_TARGETS_FILE`:
 `{"https://their-system.example": {"CONTRACT_SYSTEM_KEY": "...", "CONTRACT_SYSTEM_ID": "..."}}`.
 Keys are never part of a URL or the registry.

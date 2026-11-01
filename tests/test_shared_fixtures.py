@@ -11,6 +11,7 @@ from app.core.config import Settings
 from app.modules.testing import fixtures as app_fixtures
 from app.modules.testing.fixtures import FixtureError, baseline_systems, parse_fixtures
 from tests.contract.fixtures import DEFAULT_PATH, PHASES, load_fixtures, parse_duration
+from tests.contract.scenarios import KNOWN_ACTIONS
 
 RAW = json.loads(DEFAULT_PATH.read_text(encoding="utf-8"))
 FX = load_fixtures()
@@ -56,12 +57,12 @@ def test_every_scenario_names_a_fixture_system_and_metric():
                 FX.threshold(scenario.system, metric=step.args["metric"])
 
 
-def test_every_step_has_a_phase_and_a_duration():
+def test_every_step_has_a_phase_a_known_action_and_a_duration():
     for scenario in FX.scenarios.values():
         ids = [s.id for s in scenario.steps]
         assert len(ids) == len(set(ids))
         for step in scenario.steps:
-            assert step.phase in PHASES, step
+            assert step.phase in PHASES and step.action in KNOWN_ACTIONS, step
             assert step.at.total_seconds() >= 0
 
 

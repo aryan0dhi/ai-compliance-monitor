@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from tests.contract.cadence import cadence_violations
-from tests.contract.scenarios import assert_error_body, parse, sample_time
+from tests.contract.scenarios import ScenarioRun, assert_error_body, parse, sample_time
 
 covers = pytest.mark.covers
 VERIFIER = Path(__file__).resolve().parents[2] / "scripts" / "verify_ledger_export.py"
@@ -275,6 +275,7 @@ def export_all(api) -> list[dict]:
     acs=["AC-06"],
     endpoints=["GET /v1/ledger/verify", "GET /v1/ledger/export"],
     model4=["INV-7"],
+    model5=["Ex-5"],
     decision="D-14",
 )
 def test_ac06_ledger_verifies_and_an_edited_export_is_caught_offline(api, breach):
@@ -396,6 +397,7 @@ def test_ac01_one_hour_at_the_sampling_interval_opens_no_gap(api, test_routes):
     endpoints=["POST /v1/test/clock/advance", "POST /v1/test/reset", "GET /v1/events"],
     model1=["GAP_OPEN", "GAP_CLOSED"],
     model4=["INV-12"],
+    model5=["Ex-3"],
     decision="D-12",
 )
 def test_ac02_gap_after_three_missed_intervals_not_two(api, test_routes):
@@ -409,6 +411,7 @@ def test_ac02_gap_after_three_missed_intervals_not_two(api, test_routes):
     acs=["AC-02"],
     endpoints=["POST /v1/webhooks", "POST /v1/test/clock/advance"],
     model1=["REVIEWER_NOTIFIED"],
+    model5=["Ex-3"],
     decision="D-12",
 )
 def test_ac02_gap_notification_reaches_the_reviewer(api, receiver, test_routes):
@@ -426,6 +429,59 @@ def test_ac02_gap_notification_reaches_the_reviewer(api, receiver, test_routes):
         "state REVIEWER_NOTIFIED",
     )
     close_gap(api, gap)
+
+
+# --- Model 5 scenarios (docs/pod-interface/fixtures.json) ----------------------------------------
+
+
+def run_scenario(name, api, fixtures, receiver, test_routes, meta_phases, record_property):
+    """Runs the steps the target's phases cover; the rest are recorded as deferred, not skipped."""
+    deferred = ScenarioRun(api, fixtures, name, receiver, test_routes).run(meta_phases)
+    record_property("deferred_steps", deferred)
+
+
+@covers(
+    reqs=["REQ-03", "REQ-04", "REQ-14"],
+    endpoints=["POST /v1/metrics", "GET /v1/events/{id}", "GET /v1/events/{id}/audit"],
+    model1=["FLAGGED"],
+    model5=["Ex-1"],
+    decision="D-16",
+)
+def test_model5_ex1_serious_incident_flag(
+    api, fixtures, receiver, test_routes, meta_phases, record_property
+):
+    run_scenario("Ex-1", api, fixtures, receiver, test_routes, meta_phases, record_property)
+
+
+@covers(
+    reqs=["REQ-03"],
+    endpoints=["POST /v1/metrics", "GET /v1/events/{id}"],
+    model1=["FLAGGED"],
+    model5=["Ex-2"],
+    decision="D-16",
+)
+def test_model5_ex2_not_serious_flag(
+    api, fixtures, receiver, test_routes, meta_phases, record_property
+):
+    run_scenario("Ex-2", api, fixtures, receiver, test_routes, meta_phases, record_property)
+
+
+@covers(
+    reqs=["REQ-13", "REQ-14"],
+    endpoints=[
+        "POST /v1/metrics",
+        "GET /v1/events/{id}",
+        "GET /v1/events/{id}/audit",
+        "POST /v1/webhooks",
+    ],
+    model1=["DENIED"],
+    model5=["Ex-4"],
+    decision="D-16",
+)
+def test_model5_ex4_viewer_cannot_act_but_is_logged(
+    api, fixtures, receiver, test_routes, meta_phases, record_property
+):
+    run_scenario("Ex-4", api, fixtures, receiver, test_routes, meta_phases, record_property)
 
 
 @covers(reqs=["REQ-06"], endpoints=["GET /v1/ledger/verify"], model4=["INV-7"])
