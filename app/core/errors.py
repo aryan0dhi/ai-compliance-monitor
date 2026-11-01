@@ -1,8 +1,13 @@
 """Shared error types and handlers."""
 
+import logging
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+logger = logging.getLogger(__name__)
 
 
 class UnimplementedError(NotImplementedError):
@@ -35,3 +40,15 @@ def register_error_handlers(app: FastAPI) -> None:
             for err in exc.errors()
         ]
         return JSONResponse(status_code=400, content={"detail": errors})
+
+    # Every HTTP error, including 404 for an unknown route and 405, is {"detail": <str>} (B-22).
+    @app.exception_handler(StarletteHTTPException)
+    async def _http_error(_: Request, exc: StarletteHTTPException) -> JSONResponse:
+        return JSONResponse(
+            status_code=exc.status_code, content={"detail": exc.detail}, headers=exc.headers
+        )
+
+    @app.exception_handler(Exception)
+    async def _unhandled(_: Request, exc: Exception) -> JSONResponse:
+        logger.error("unhandled exception", exc_info=exc)
+        return JSONResponse(status_code=500, content={"detail": "internal server error"})

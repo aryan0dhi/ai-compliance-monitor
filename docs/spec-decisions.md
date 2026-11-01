@@ -143,12 +143,17 @@ until that event's `retain_until`.
 Implemented as below and open to change by pod agreement. Each choice favors the strictest
 reading of the contract, or least privilege, when the contract is silent.
 
+The page envelope and the error body are interim and codified in issue #25 (pod-interface B-22),
+**not agreed**. Open: whether `total` is required; whether `400` keeps a list of `{loc, msg, type}`
+(FastAPI's own shape, minus the input); a disallowed webhook URL as `400` or `422`.
+
 | Topic | Section 5 says | Interim behavior |
 |---|---|---|
 | Pagination format | "paginated array of Event summaries" | `limit` (1–200, default 50) and `offset` (0 to 2⁶³−1, PostgreSQL's bigint limit) query params. Response `{"items": [...], "total", "limit", "offset"}` |
 | List ordering | not specified | Newest `detected_at` first; `event_id` breaks ties so pages are stable |
 | Event summary fields | not specified | `event_id, system_id, type, state, detected_at, metric_name` |
 | Invalid list query (bad `state`, naive `since`, `limit=0`, ...) | only `401` listed | `400`, same as malformed bodies |
+| Error body | not specified | `{"detail": <string>}` for every error status including `404` (unknown path), `405`, `500` (fixed text, traceback only in the log) and `501`; `400` validation errors list `{loc, msg, type}`. Never echoes input, URLs or exception text |
 | Who may read events | only `401` listed | `viewer`, `reviewer`, `admin`. Monitored-system keys get `403` (they only submit metrics) |
 | Who may submit metrics | system keys "are used for metric submission" | Only a system key whose `system_id` matches the body. Human keys get `403` |
 | Malformed `event_id` in path | `404` if it doesn't exist | `404` (an id that is not an event's id can't exist) |

@@ -20,6 +20,8 @@ info:
       agreement; everything else restates Section 5.
     * Time values are RFC 3339 date-times **with an offset**; responses use UTC. Identifiers are
       opaque strings (`Id`). Bodies are JSON (`application/json`). Unknown request fields are ignored.
+    * Every error status, including `404` for an unknown path, `405` and `500`, has an `Error`
+      body (**Proposed**, B-22).
 servers:
   - url: "{baseUrl}"
     description: A team's deployment, listed in the pod registry (README.md, "Registry entry").
@@ -343,7 +345,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "422":
-          description: The URL is refused or didn't answer the verification POST with 2xx
+          description: The URL didn't answer the verification POST with 2xx (a refused URL is `400`)
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -362,7 +364,11 @@ paths:
         "204": { description: Reset complete }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
-        "404": { description: Not a test deployment }
+        "404":
+          description: Not a test deployment
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /v1/test/clock/advance:
     post:
@@ -389,7 +395,11 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
-        "404": { description: Not a test deployment }
+        "404":
+          description: Not a test deployment
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /v1/test/clock:
     get:
@@ -406,7 +416,11 @@ paths:
               schema: { $ref: "#/components/schemas/Clock" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
-        "404": { description: Not a test deployment }
+        "404":
+          description: Not a test deployment
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
 webhooks:
   notification:
@@ -486,10 +500,15 @@ components:
 
     Error:
       type: object
+      description: |
+        **Proposed** (B-22). The body of every error status, including `404` for an unknown path,
+        `405` and `500`.
       required: [detail]
       properties:
         detail:
-          description: Human-readable message, or a list of field errors. Never echoes raw input.
+          description: |
+            Human-readable message, or a list of field errors `{loc, msg, type}`. Never echoes
+            raw input.
           oneOf:
             - type: string
             - type: array

@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from tests.contract.cadence import cadence_violations
+from tests.contract.scenarios import assert_error_body, parse, sample_time
 
 covers = pytest.mark.covers
 VERIFIER = Path(__file__).resolve().parents[2] / "scripts" / "verify_ledger_export.py"
@@ -26,14 +27,6 @@ def offline_verifier():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
-
-
-_SEQ = iter(range(1, 10**9))
-
-
-def sample_time() -> str:
-    # Unique per call, so repeats never collide on (system_id, metric_name, timestamp).
-    return (datetime.now(UTC) + timedelta(microseconds=next(_SEQ))).isoformat()
 
 
 def send(api, value, *, drift=True, as_="system", system_id=None, timestamp=None):
@@ -51,10 +44,6 @@ def send(api, value, *, drift=True, as_="system", system_id=None, timestamp=None
 def items(page):
     """Section 5 says "paginated array"; accept a bare list or an {"items": [...]} envelope."""
     return page if isinstance(page, list) else page["items"]
-
-
-def parse(ts: str) -> datetime:
-    return datetime.fromisoformat(ts.replace("Z", "+00:00"))
 
 
 @pytest.fixture(scope="module")
@@ -110,6 +99,59 @@ def test_roles_are_enforced(api):
 def test_only_admins_register_webhooks(api):
     body = {"url": "https://example.com/hook", "event_types": ["flag_notification"]}
     assert api.call("POST", "/v1/webhooks", as_="viewer", json=body).status_code == 403
+
+
+SENTINEL = "contract-sentinel-7f3a"
+JSON_HEADERS = {"Content-Type": "application/json"}
+
+
+def _conflicting_duplicate(api):
+    resp, body = send(api, 0.1)
+    assert resp.status_code == 201, resp.text
+    return api.call("POST", "/v1/metrics", as_="system", json={**body, "value": 0.2})
+
+
+ERROR_CASES = {
+    400: [
+        lambda api: api.call(
+            "POST", "/v1/metrics", as_="system", content=b"{", headers=JSON_HEADERS
+        ),
+        lambda api: api.call(
+            "POST",
+            "/v1/metrics",
+            as_="system",
+            json={"system_id": SENTINEL, "metric_type": SENTINEL, "value": SENTINEL},
+        ),
+        lambda api: api.call("GET", "/v1/events", as_="viewer", params={"limit": SENTINEL}),
+    ],
+    401: [lambda api: api.call("GET", "/v1/events", as_=None)],
+    403: [lambda api: send(api, 0.1, as_="viewer")[0]],
+    404: [
+        lambda api: api.call("GET", f"/v1/events/{UNKNOWN_EVENT}", as_="viewer"),
+        lambda api: api.call("GET", f"/v1/events/{SENTINEL}", as_="viewer"),
+        lambda api: api.call("GET", f"/v1/{SENTINEL}", as_="viewer"),
+    ],
+    405: [lambda api: api.call("DELETE", "/v1/events", as_="viewer")],
+    409: [_conflicting_duplicate],
+}
+
+
+@covers(
+    reqs=["REQ-13"],
+    endpoints=["POST /v1/metrics", "GET /v1/events", "GET /v1/events/{id}"],
+    decision="D-06",
+)
+@pytest.mark.parametrize(
+    ("status", "case"),
+    [(s, c) for s, cases in ERROR_CASES.items() for c in cases],
+    ids=lambda v: str(v) if isinstance(v, int) else "case",
+)
+def test_error_body_on_each_status(api, test_routes, status, case):
+    """B-22: {"detail": ...} JSON on every error status, never echoing the request."""
+    resp = case(api)
+    assert resp.status_code == status, resp.text
+    assert_error_body(resp)
+    assert SENTINEL not in resp.text
 
 
 # --- REQ-01 / REQ-03: ingestion and flagging -----------------------------------------------------

@@ -164,14 +164,21 @@ class HttpWebhookSender:
                 ):
                     status_code = response.status_code
             except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
-                result = SendResult(False, None, f"{type(exc).__name__}: {exc}"[:500])
+                result = SendResult(False, None, _failure_text(exc))
                 continue
             except httpx.HTTPError as exc:
-                return SendResult(False, None, f"{type(exc).__name__}: {exc}"[:500])
+                return SendResult(False, None, _failure_text(exc))
             if 200 <= status_code < 300:
                 return SendResult(ok=True, status_code=status_code, error=None)
             return SendResult(ok=False, status_code=status_code, error=f"HTTP {status_code}")
         return result
+
+
+def _failure_text(exc: httpx.HTTPError) -> str:
+    """Fixed text: httpx messages can contain the URL, and this reaches the 422 body (B-22)."""
+    if isinstance(exc, httpx.TimeoutException):
+        return "timed out"
+    return "connection failed" if isinstance(exc, httpx.ConnectError) else "request failed"
 
 
 def sender_from_settings() -> HttpWebhookSender:

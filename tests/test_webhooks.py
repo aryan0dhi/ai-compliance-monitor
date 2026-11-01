@@ -174,7 +174,7 @@ class TestSender:
             raise httpx.ConnectError("refused")
 
         result = self.sender(handler).send("https://hooks.example.com/", b"{}", "s")
-        assert not result.ok and result.status_code is None and "ConnectError" in result.error
+        assert not result.ok and result.status_code is None and result.error == "connection failed"
 
     def test_falls_back_to_the_next_address_only_when_connecting_fails(self):
         v6, v4 = ipaddress.ip_address("2606:4700:4700::1111"), PUBLIC
@@ -211,7 +211,7 @@ class TestSender:
             transport=httpx.MockTransport(handler),
         )
         result = sender.send("https://hooks.example.com/", b"{}", "s")
-        assert not result.ok and "ReadTimeout" in result.error and len(tried) == 1
+        assert not result.ok and result.error == "timed out" and len(tried) == 1
 
     def test_unsafe_target_is_never_contacted(self):
         def handler(request):  # pragma: no cover - must not be reached
