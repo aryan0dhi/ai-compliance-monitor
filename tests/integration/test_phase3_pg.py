@@ -494,3 +494,18 @@ def test_test_routes_over_http(pg_sessionmaker, seed, monkeypatch):
         assert s.get(MonitoredSystem, BASELINE_SYSTEMS[0].id) is not None
     # Building the app does not swap the global clock; only the server lifespan installs it.
     assert isinstance(get_clock(), SystemClock)
+
+
+def test_non_uuid_ids_never_reach_the_database(pg_sessionmaker):
+    """Opaque ids (issue #24): a non-UUID id is an unknown id, not a `::uuid` cast error."""
+    make_uow = lambda: SqlAlchemyUnitOfWork(pg_sessionmaker)  # noqa: E731
+    viewer = create_user(make_uow(), name="viewer", role=Role.VIEWER)
+    app = create_app()
+    app.dependency_overrides[get_uow] = make_uow
+    client = TestClient(app)
+    headers = {"Authorization": f"Bearer {viewer.api_key}"}
+
+    listed = client.get("/v1/events?system_id=not-a-uuid", headers=headers)
+    assert listed.status_code == 200 and listed.json()["items"] == []
+    assert client.get("/v1/events/not-a-uuid", headers=headers).status_code == 404
+    assert client.get("/v1/events/not-a-uuid/audit", headers=headers).status_code == 404

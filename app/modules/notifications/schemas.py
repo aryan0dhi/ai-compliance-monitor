@@ -1,10 +1,8 @@
 """POST /v1/webhooks request and response bodies (Section 5.1)."""
 
-from uuid import UUID
-
 from pydantic import BaseModel, Field
 
-from app.core.types import UtcDatetime
+from app.core.types import IdOut, UtcDatetime
 from app.modules.notifications.delivery import MAX_URL_LENGTH, SIGNATURE_HEADER
 from app.modules.notifications.models import NotificationType
 from app.modules.notifications.service import RegisteredWebhook
@@ -23,7 +21,7 @@ class WebhookIn(BaseModel):
 
 
 class WebhookOut(BaseModel):
-    webhook_id: UUID
+    webhook_id: IdOut
     url: str
     event_types: list[NotificationType]
     created_at: UtcDatetime

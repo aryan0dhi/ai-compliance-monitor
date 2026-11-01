@@ -300,6 +300,11 @@ class TestRoutes:
     def test_audit_unknown_event_is_404(self, client, event_id):
         assert client.get(f"/v1/events/{event_id}/audit").status_code == 404
 
+    def test_audit_needs_the_canonical_id(self, client, filled):
+        event, _ = filled
+        assert client.get(f"/v1/events/{str(event.id).upper()}/audit").status_code == 404
+        assert client.get(f"/v1/events/{event.id.hex}/audit").status_code == 404
+
     def test_system_key_is_403(self, client):
         client.app.dependency_overrides[get_principal] = lambda: system_principal(uuid4())
         assert client.get("/v1/ledger/verify").status_code == 403

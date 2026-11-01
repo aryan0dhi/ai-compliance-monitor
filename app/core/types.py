@@ -3,9 +3,16 @@
 import re
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any
+from uuid import UUID
 
-from pydantic import AfterValidator, AwareDatetime, BeforeValidator, PlainSerializer
+from pydantic import (
+    AfterValidator,
+    AwareDatetime,
+    BeforeValidator,
+    PlainSerializer,
+    StringConstraints,
+)
 
 
 def _to_utc(value: datetime) -> datetime:
@@ -53,3 +60,35 @@ IsoAwareDatetime = Annotated[AwareDatetime, BeforeValidator(_require_iso_8601)]
 # metric_name: no leading/trailing whitespace and no control characters (C0, DEL, C1). Expressed
 # as a pattern so the OpenAPI document states the rule.
 METRIC_NAME_PATTERN = r"^[^\s\x00-\x1f\x7f-\x9f](?:[^\x00-\x1f\x7f-\x9f]*[^\s\x00-\x1f\x7f-\x9f])?$"
+
+# Ids are opaque strings at the HTTP boundary (issue #24); internally they are UUIDs. The bounds
+# are a proposal awaiting pod agreement. Explicit ASCII classes (not \w) keep Unicode out of the
+# pattern; these characters are URL-unreserved, so an id is safe in paths and queries.
+ID_PATTERN = r"^[A-Za-z0-9._~-]+$"
+ID_MAX_LENGTH = 64
+
+# Input id (request body field). For a query parameter use `Query(pattern=..., max_length=...)`.
+OpaqueId = Annotated[
+    str, StringConstraints(min_length=1, max_length=ID_MAX_LENGTH, pattern=ID_PATTERN)
+]
+
+
+def _id_to_str(value: Any) -> Any:
+    return value if value is None or isinstance(value, str) else str(value)
+
+
+# Output id: services keep passing UUID objects; the response shows a plain string. Type checkers
+# see `str | UUID` so constructors accept either.
+if TYPE_CHECKING:
+    IdOut = str | UUID
+else:
+    IdOut = Annotated[str, BeforeValidator(_id_to_str)]
+
+
+def to_internal_id(value: str) -> UUID | None:
+    """The UUID an id names, or None. Only the canonical spelling matches, so ids stay exact."""
+    try:
+        parsed = UUID(value)
+    except ValueError:
+        return None
+    return parsed if str(parsed) == value else None

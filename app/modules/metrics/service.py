@@ -57,9 +57,17 @@ class IngestResult:
     created: bool
 
 
-def authorize_submission(principal: Principal, system_id: UUID) -> None:
-    """Section 5.1: metric submission uses a monitored-system key scoped to that system_id."""
-    if principal.role is not Role.SYSTEM or principal.system_id != system_id:
+def authorize_submission(principal: Principal, system_id: str) -> None:
+    """Section 5.1: metric submission uses a monitored-system key scoped to that system_id.
+
+    Compares string forms, so an id other than the key's canonical one (e.g. not a UUID) never
+    matches.
+    """
+    if (
+        principal.role is not Role.SYSTEM
+        or principal.system_id is None
+        or str(principal.system_id) != system_id
+    ):
         raise SystemScopeError("API key is not scoped to this system_id")
 
 
@@ -78,7 +86,7 @@ def ingest_metric(
     breach) the event, its ledger entry and its notification. If any step fails, nothing is
     stored.
     """
-    authorize_submission(principal, submission.system_id)
+    authorize_submission(principal, str(submission.system_id))
 
     with uow:
         system = uow.systems.get(submission.system_id)

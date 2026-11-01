@@ -19,7 +19,7 @@ info:
     * Descriptions starting with **Proposed** add to the Phase 2 Section 5 contract and need pod
       agreement; everything else restates Section 5.
     * Time values are RFC 3339 date-times **with an offset**; responses use UTC. Identifiers are
-      UUIDs. Bodies are JSON (`application/json`). Unknown request fields are ignored.
+      opaque strings (`Id`). Bodies are JSON (`application/json`). Unknown request fields are ignored.
 servers:
   - url: "{baseUrl}"
     description: A team's deployment, listed in the pod registry (README.md, "Registry entry").
@@ -125,7 +125,12 @@ paths:
       x-phase: 3
       x-reqs: [REQ-02, REQ-03]
       parameters:
-        - { name: system_id, in: query, schema: { type: string, format: uuid } }
+        - name: system_id
+          in: query
+          description: |
+            Only events of this system. A well-formed id that names no system gives an empty page
+            (`200`); an id outside the `Id` pattern or length is `400`.
+          schema: { $ref: "#/components/schemas/Id" }
         - { name: state, in: query, schema: { $ref: "#/components/schemas/EventState" } }
         - { name: type, in: query, schema: { $ref: "#/components/schemas/EventType" } }
         - name: since
@@ -438,7 +443,7 @@ components:
       in: path
       required: true
       schema: { type: string }
-      description: Event UUID. Ids that name no event, malformed ones included, are `404`.
+      description: Opaque event id. Ids that name no event, malformed ones included, are `404`.
 
   responses:
     BadRequest:
@@ -470,6 +475,15 @@ components:
           schema: { $ref: "#/components/schemas/Error" }
 
   schemas:
+    Id:
+      type: string
+      minLength: 1
+      maxLength: 64
+      pattern: "^[A-Za-z0-9._~-]+$"
+      description: |
+        Opaque identifier. **Proposed:** 1-64 URL-unreserved characters. Consumers MUST NOT assume
+        a format.
+
     Error:
       type: object
       required: [detail]
@@ -497,9 +511,9 @@ components:
       type: object
       required: [actor_id, role]
       properties:
-        actor_id: { type: string, format: uuid }
+        actor_id: { $ref: "#/components/schemas/Id" }
         role: { $ref: "#/components/schemas/Role" }
-        system_id: { type: [string, "null"], format: uuid }
+        system_id: { oneOf: [{ $ref: "#/components/schemas/Id" }, { type: "null" }] }
 
     Role:
       type: string
@@ -513,7 +527,7 @@ components:
       type: object
       required: [system_id, metric_name, metric_type, value, timestamp]
       properties:
-        system_id: { type: string, format: uuid }
+        system_id: { $ref: "#/components/schemas/Id" }
         metric_name:
           type: string
           minLength: 1
@@ -534,7 +548,7 @@ components:
         - $ref: "#/components/schemas/MetricSampleIn"
         - type: object
           properties:
-            flagged_event_id: { type: string, format: uuid }
+            flagged_event_id: { $ref: "#/components/schemas/Id" }
 
     EventType:
       type: string
@@ -552,8 +566,8 @@ components:
       type: object
       required: [event_id, system_id, type, state, detected_at]
       properties:
-        event_id: { type: string, format: uuid }
-        system_id: { type: string, format: uuid }
+        event_id: { $ref: "#/components/schemas/Id" }
+        system_id: { $ref: "#/components/schemas/Id" }
         type: { $ref: "#/components/schemas/EventType" }
         state: { $ref: "#/components/schemas/EventState" }
         detected_at: { type: string, format: date-time }
@@ -585,7 +599,7 @@ components:
         prefill_evidence:
           type: [string, "null"]
           description: Evidence drawn from the event record, or null when none is available (never guessed).
-        confirmed_by: { type: [string, "null"], format: uuid }
+        confirmed_by: { oneOf: [{ $ref: "#/components/schemas/Id" }, { type: "null" }] }
         confirmed_at: { type: [string, "null"], format: date-time }
 
     HarmFields:
@@ -613,7 +627,7 @@ components:
           oneOf:
             - $ref: "#/components/schemas/DispositionTier"
             - type: "null"
-        reviewer_id: { type: string, format: uuid }
+        reviewer_id: { $ref: "#/components/schemas/Id" }
         recorded_at: { type: string, format: date-time }
         rationale: { type: [string, "null"] }
         deadline_utc: { type: [string, "null"], format: date-time }
@@ -689,7 +703,7 @@ components:
           required: [tier, reviewer_id]
           properties:
             tier: { $ref: "#/components/schemas/DispositionTier" }
-            reviewer_id: { type: string, format: uuid }
+            reviewer_id: { $ref: "#/components/schemas/Id" }
             rationale: { type: [string, "null"] }
         detected_at: { type: string, format: date-time }
         determination_at: { type: string, format: date-time }
@@ -703,8 +717,7 @@ components:
       required: [actor_id, action, timestamp]
       properties:
         actor_id:
-          type: [string, "null"]
-          format: uuid
+          oneOf: [{ $ref: "#/components/schemas/Id" }, { type: "null" }]
           description: The caller's `actor_id` (see `/v1/me`); null for the service's own background actions.
         action:
           type: string
@@ -718,8 +731,8 @@ components:
       properties:
         seq: { type: integer, minimum: 1 }
         entry_type: { type: string }
-        event_id: { type: [string, "null"], format: uuid }
-        actor_id: { type: [string, "null"], format: uuid }
+        event_id: { oneOf: [{ $ref: "#/components/schemas/Id" }, { type: "null" }] }
+        actor_id: { oneOf: [{ $ref: "#/components/schemas/Id" }, { type: "null" }] }
         at:
           type: string
           description: The exact string that was hashed (UTC, microseconds, "+00:00"; B-06).
@@ -771,7 +784,7 @@ components:
       type: object
       required: [webhook_id]
       properties:
-        webhook_id: { type: string, format: uuid }
+        webhook_id: { $ref: "#/components/schemas/Id" }
         secret:
           type: string
           description: |
@@ -782,9 +795,9 @@ components:
       type: object
       required: [notification_id, notification_type, event_id, created_at, event]
       properties:
-        notification_id: { type: string, format: uuid, description: Deduplication key. }
+        notification_id: { $ref: "#/components/schemas/Id", description: Deduplication key. }
         notification_type: { $ref: "#/components/schemas/NotificationType" }
-        event_id: { type: string, format: uuid }
+        event_id: { $ref: "#/components/schemas/Id" }
         created_at: { type: string, format: date-time, description: Detection time (service clock). }
         deliver_by: { type: string, format: date-time }
         event:
@@ -792,9 +805,9 @@ components:
           required: [event_id, type, system_id, detected_at]
           description: Snapshot of the event; other fields are implementation-defined.
           properties:
-            event_id: { type: string, format: uuid }
+            event_id: { $ref: "#/components/schemas/Id" }
             type: { $ref: "#/components/schemas/EventType" }
-            system_id: { type: string, format: uuid }
+            system_id: { $ref: "#/components/schemas/Id" }
             detected_at: { type: string, format: date-time }
         reminder:
           type: object

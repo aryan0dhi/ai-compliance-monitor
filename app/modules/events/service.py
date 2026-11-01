@@ -120,6 +120,8 @@ def list_events(
 ) -> EventPage:
     """List events. Per Section 5.1 this has no state change, so no ledger entry is written."""
     _require_reader(principal)
+    if filters.match_nothing:
+        return EventPage(items=[], total=0, limit=limit, offset=offset)
     with uow:
         items, total = uow.events.list(filters, limit=limit, offset=offset)
     return EventPage(items=items, total=total, limit=limit, offset=offset)

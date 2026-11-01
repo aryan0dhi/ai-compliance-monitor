@@ -86,6 +86,16 @@ class TestPostMetrics:
         assert "flagged_event_id" not in resp.json()
         assert uow.events.rows == {}
 
+    @pytest.mark.parametrize("system_id", ["not-a-uuid", str(SYSTEM_ID).upper()])
+    @pytest.mark.parametrize("role", [None, Role.VIEWER])
+    def test_id_other_than_the_keys_own_is_403(self, api, uow, system_id, role):
+        # Ids are opaque: a non-UUID or non-canonical spelling just isn't this key's id.
+        if role is not None:
+            api.as_user(role)
+        resp = api.client.post("/v1/metrics", json={**VALID_METRIC, "system_id": system_id})
+        assert resp.status_code == 403
+        assert uow.metrics.rows == {}
+
     def test_integer_value_accepted(self, api):
         resp = api.client.post("/v1/metrics", json={**VALID_METRIC, "value": 1})
         assert resp.status_code == 201 and resp.json()["value"] == 1
@@ -105,7 +115,8 @@ class TestPostMetrics:
             {"metric_type": None},
             {"value": None},
             {"timestamp": None},
-            {"system_id": "not-a-uuid"},
+            {"system_id": ""},
+            {"system_id": "x" * 65},
             {"metric_name": ""},
             {"metric_name": "   "},
             {"metric_type": "latency"},
@@ -247,7 +258,9 @@ class TestGetEvents:
         [
             "state=flagged",
             "type=BREACH",
-            "system_id=abc",
+            f"system_id={'x' * 65}",
+            "system_id=a%20b",
+            "system_id=a%2Fb",
             "since=2026-09-27T20:00:00",
             "limit=0",
             "limit=201",
@@ -263,6 +276,15 @@ class TestGetEvents:
     )
     def test_invalid_query_is_400(self, api, flagged, query):
         assert api.client.get(f"/v1/events?{query}").status_code == 400
+
+    @pytest.mark.parametrize("system_id", ["abc", "x" * 64, str(SYSTEM_ID).upper()])
+    def test_well_formed_id_that_is_not_a_known_uuid_matches_nothing(self, api, flagged, system_id):
+        body = api.client.get(f"/v1/events?system_id={system_id}").json()
+        assert body["items"] == [] and body["total"] == 0
+
+    def test_system_key_still_gets_403_for_a_non_uuid_system_id(self, api, flagged):
+        api.principal = system_principal(SYSTEM_ID)
+        assert api.client.get("/v1/events?system_id=abc").status_code == 403
 
     def test_detail(self, api, flagged, ledger):
         resp = api.client.get(f"/v1/events/{flagged}")
@@ -285,8 +307,11 @@ class TestGetEvents:
     def test_unknown_event_is_404(self, api, flagged):
         assert api.client.get(f"/v1/events/{uuid4()}").status_code == 404
 
-    def test_malformed_event_id_is_404(self, api, flagged):
-        assert api.client.get("/v1/events/not-a-uuid").status_code == 404
+    @pytest.mark.parametrize("event_id", ["not-a-uuid", "x" * 64, "UPPER", "FLAGGED_UPPER"])
+    def test_malformed_event_id_is_404(self, api, flagged, event_id):
+        if event_id == "FLAGGED_UPPER":
+            event_id = flagged.upper()
+        assert api.client.get(f"/v1/events/{event_id}").status_code == 404
 
     def test_system_key_cannot_read_events(self, api, flagged):
         api.principal = system_principal(SYSTEM_ID)

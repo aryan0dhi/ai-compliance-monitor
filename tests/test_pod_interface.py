@@ -8,6 +8,7 @@
   tests/integration and the live contract suite).
 """
 
+import json
 import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -164,3 +165,10 @@ def test_conforms_to_pod_interface(case):
         except (ValueError, OverflowError):
             reject()
     case.call_and_validate()
+
+
+def test_ids_are_opaque_strings_in_both_documents():
+    """Neither the pod document nor the generated one may declare an id as a UUID."""
+    generated = create_app().openapi()
+    for doc in (SPEC, generated):
+        assert '"format": "uuid"' not in json.dumps(doc)

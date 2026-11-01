@@ -12,6 +12,7 @@ from app.modules.metrics.service import (
     MetricTypeMismatchError,
     SystemScopeError,
     UnknownSystemError,
+    authorize_submission,
     ingest_metric,
 )
 from app.modules.notifications.interface import Notifier, get_notifier
@@ -42,6 +43,8 @@ def submit_metric(
     clock: Clock = Depends(get_clock),
 ) -> MetricSampleOut:
     try:
+        # Before to_submission: a system_id that isn't the key's own can't be converted.
+        authorize_submission(principal, body.system_id)
         result = ingest_metric(
             body.to_submission(),
             principal=principal,

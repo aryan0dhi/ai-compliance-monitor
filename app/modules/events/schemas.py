@@ -1,18 +1,17 @@
 """GET /v1/events and GET /v1/events/{event_id} response bodies (Phase 2, Section 5.2 Event)."""
 
 from typing import Any
-from uuid import UUID
 
 from pydantic import BaseModel
 
-from app.core.types import JsonDecimal, UtcDatetime
+from app.core.types import IdOut, JsonDecimal, UtcDatetime
 from app.modules.events.models import Event, EventState, EventType
 from app.modules.events.service import EventPage
 
 
 class EventSummary(BaseModel):
-    event_id: UUID
-    system_id: UUID
+    event_id: IdOut
+    system_id: IdOut
     type: EventType
     state: EventState
     detected_at: UtcDatetime
@@ -56,8 +55,8 @@ class EventDetail(BaseModel):
     null / empty.
     """
 
-    event_id: UUID
-    system_id: UUID
+    event_id: IdOut
+    system_id: IdOut
     type: EventType
     state: EventState
     detected_at: UtcDatetime
@@ -69,7 +68,7 @@ class EventDetail(BaseModel):
     metric_timestamp: UtcDatetime | None
     observed_value: JsonDecimal | None
     threshold_value: JsonDecimal | None
-    threshold_version_id: UUID | None
+    threshold_version_id: IdOut | None
     # REQ-05 storage.
     retain_until: UtcDatetime
     evidence_bundle_hash: str | None

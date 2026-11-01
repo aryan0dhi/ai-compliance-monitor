@@ -31,8 +31,9 @@ final, because cross-team tests depend on them.
 
 Ordered by impact on cross-team testing:
 
-1. **D-06**: pagination shape, who may read events, `400` for invalid queries. The other team's
-   harness will call these endpoints directly.
+1. **D-06**: pagination shape, who may read events, `400` for invalid queries, and the id
+   length/pattern bound (opaque ids). The other team's harness will call these endpoints
+   directly.
 2. **D-09**: one event per breaching sample (current) or one per breach episode. This changes
    how many events and notifications AC-03/AC-04/AC-16 should expect.
 3. **D-04**: status codes for duplicate submissions (`200`/`409` now).
@@ -150,13 +151,13 @@ reading of the contract, or least privilege, when the contract is silent.
 | Invalid list query (bad `state`, naive `since`, `limit=0`, ...) | only `401` listed | `400`, same as malformed bodies |
 | Who may read events | only `401` listed | `viewer`, `reviewer`, `admin`. Monitored-system keys get `403` (they only submit metrics) |
 | Who may submit metrics | system keys "are used for metric submission" | Only a system key whose `system_id` matches the body. Human keys get `403` |
-| Malformed `event_id` in path | `404` if it doesn't exist | `404` (a malformed id can't exist) |
+| Malformed `event_id` in path | `404` if it doesn't exist | `404` (an id that is not an event's id can't exist) |
 | `flagged_event_id` when no breach | "also contains" on breach | Omitted from the response |
 | `value` | number | JSON number only. Strings, booleans, `NaN` and infinities get `400`. Stored as exact `numeric` |
 | `timestamp` | ISO-8601 UTC | ISO-8601 string with an offset. Naive values and numbers (which a lenient parser would read as Unix time) get `400`. Other offsets are accepted and normalized to UTC; responses use `Z`. Values that fall outside year 1–9999 once converted to UTC get `400` |
 | `metric_name` | string | 1–255 characters, no leading/trailing whitespace, no control characters (published as a `pattern` in the OpenAPI document). Whitespace variants would silently miss their threshold |
 | `since` (GET /v1/events) | not specified | Compared with `detected_at` (inclusive). ISO-8601 with an offset only |
-| `system_id` | "UUID/string" in MetricSample, UUID in Event | UUID only (`400` otherwise) |
+| Id format (`system_id`, `event_id`, `actor_id`, ...) | "UUID/string" in MetricSample, UUID in Event | Opaque string, 1-64 characters from `[A-Za-z0-9._~-]` (`400` otherwise). Internally UUIDs matched in canonical lowercase form only, so an uppercase or unhyphenated spelling of a real id is unknown (this changed from accepting any UUID spelling). A well-formed filter id that is no UUID gives an empty `200` on `GET /v1/events`; as a body `system_id` it is `403`. Proposed, awaiting pod agreement on the bound and pattern |
 | Unknown `system_id` with a valid key | not specified | `400` (should not occur once auth exists) |
 | `metric_type` differs from the configured threshold's | not specified | `400`, nothing stored. Silently mixing types could hide a breach |
 | Unknown fields in the body | not specified | Ignored |
