@@ -42,8 +42,9 @@ def send(api, value, *, drift=True, as_="system", system_id=None, timestamp=None
 
 
 def items(page):
-    """Section 5 says "paginated array"; accept a bare list or an {"items": [...]} envelope."""
-    return page if isinstance(page, list) else page["items"]
+    """The D-06 envelope {items, total, limit, offset}; a bare list is not accepted."""
+    assert isinstance(page, dict) and isinstance(page["items"], list), page
+    return page["items"]
 
 
 @pytest.fixture(scope="module")
@@ -219,6 +220,23 @@ def test_listing_filters_by_system_and_type(api, breach):
     assert items(none.json()) == []
 
 
+@covers(reqs=["REQ-03"], endpoints=["GET /v1/events"], decision="D-06")
+def test_events_page_envelope(api, breach):
+    assert send(api, round(api.target.drift_limit + 0.05, 6))[0].status_code == 201
+    first = api.call("GET", "/v1/events", as_="viewer", params={"limit": 1, "offset": 0})
+    assert first.status_code == 200, first.text
+    page = first.json()
+    assert set(page) == {"items", "total", "limit", "offset"}, page
+    assert (page["limit"], page["offset"]) == (1, 0) and len(page["items"]) == 1
+    assert page["total"] >= 2
+    second = api.call("GET", "/v1/events", as_="viewer", params={"limit": 1, "offset": 1}).json()
+    assert second["offset"] == 1 and second["total"] >= page["total"]
+    assert page["items"][0]["event_id"] != second["items"][0]["event_id"]
+    everything = items(api.call("GET", "/v1/events", as_="viewer", params={"limit": 200}).json())
+    detected = [parse(e["detected_at"]) for e in everything]
+    assert detected == sorted(detected, reverse=True)  # newest first
+
+
 # --- REQ-14 / REQ-06: audit trail and ledger -----------------------------------------------------
 
 
@@ -316,12 +334,12 @@ def open_gap(api) -> dict:
     known = set(gap_ids(api))
     assert send(api, 0.1)[0].status_code == 201  # last data now
 
-    # Boundary: withholding 2 intervals must NOT trigger.
-    advance_clock(api, 2 * interval)
+    # Boundary: withholding one interval fewer than the gap threshold must NOT trigger.
+    advance_clock(api, (api.target.gap_intervals - 1) * interval)
     time.sleep(GAP_SETTLE_S)
     assert set(gap_ids(api)) == known
 
-    # 3 intervals: a gap event appears.
+    # The full threshold (3 intervals in the fixtures): a gap event appears.
     advance_clock(api, interval)
 
     def new_gap():
@@ -338,7 +356,7 @@ def close_gap(api, gap: dict) -> None:
     api.wait_for(lambda: gap_ids(api)[gap["event_id"]]["state"] == "GAP_CLOSED", "GAP_CLOSED")
     detail = api.call("GET", f"/v1/events/{gap['event_id']}", as_="viewer").json()
     if "gap_duration_seconds" in detail:
-        assert detail["gap_duration_seconds"] >= 3 * api.target.interval_s
+        assert detail["gap_duration_seconds"] >= api.target.gap_intervals * api.target.interval_s
 
 
 @covers(

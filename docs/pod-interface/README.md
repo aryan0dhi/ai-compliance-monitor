@@ -172,6 +172,13 @@ deployment provides.
 - **Test routes.** `/v1/test/reset`, `/v1/test/clock/advance` and `GET /v1/test/clock` exist
   only in test deployments and MUST return `404` in production. The clock only moves forward.
 
+- **B-24 Scenarios (Proposed, D-16).** `scenarios` in [fixtures.json](fixtures.json) encodes Model 5
+  Ex-1 to Ex-5 as steps: `phase`, `at` (an ISO-8601 offset from the scenario's start on the
+  service clock; Model 5's wall-clock times are `label`s), `actor`, `action` and `expect`. A tester
+  runs the steps up to the highest phase in `GET /v1/meta` and reports the rest as deferred, never
+  skipped. A step with `needs: ["webhooks"]` also needs a reachable receiver. Ex-3 and Ex-5 are
+  covered by the AC-02 and AC-06 tests.
+
 ## Registry entry
 
 Each team adds its deployment to the pod registry with:
@@ -205,7 +212,7 @@ Each team adds its deployment to the pod registry with:
 | D-12 | Gap states `GAP_OPEN`/`REVIEWER_NOTIFIED`/`GAP_CLOSED` | State assertions on gaps |
 | D-13 | Admin-only webhooks and test routes | Which key a harness uses |
 | D-14 | Common ledger hash rule (B-06) | Independent re-verification (Q4.3) |
-| D-16 | Standard fixtures (B-20) | Every test's inputs |
+| D-16 | Standard fixtures and scenarios file (B-20, B-24) | Every test's inputs |
 | new | `/v1/meta`, `/v1/me`, `GET /v1/test/clock`, report submission, 30 s settle time (B-21) | Discovery, AC-15 identity, timing |
 | D-03 | Whether `REPORT_READY`/`SUBMITTED` are visible states | Phase 5 assertions |
 

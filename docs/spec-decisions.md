@@ -38,7 +38,8 @@ Ordered by impact on cross-team testing:
    how many events and notifications AC-03/AC-04/AC-16 should expect.
 3. **D-04**: status codes for duplicate submissions (`200`/`409` now).
 4. **D-07**: how thresholds are configured, and the shared fixture format for
-   `/v1/test/reset`. Proposed: `docs/pod-interface/fixtures.json` (D-16).
+   `/v1/test/reset`. Proposed: `docs/pod-interface/fixtures.json`, with the Model 5 scenarios
+   (D-16).
 5. **D-01**: shared fixtures must say whether each threshold is `above` or `below`.
 6. **D-03**: state names before Phase 4 (`DISPOSITIONED` vs `CLASSIFIED`, etc.).
 7. **D-08**: whether listing events writes ledger entries.
@@ -304,10 +305,13 @@ in `app/modules/ledger/chain.py`, reimplemented in `scripts/verify_ledger_export
   the fixtures are deleted, so the fixture set is exact. Accounts and API keys are kept, so
   testers' keys keep working; a system with an account is kept too, without thresholds (open:
   delete such accounts and keys instead?).
-- **Fixtures.** `docs/pod-interface/fixtures.json` is the single copy: the app reseeds from it
-  (`FIXTURES_PATH`) and the README table is checked against it. The systems and thresholds come
-  from the spec's examples (Section 5.2 system id, Model 5 loan-scorer and resume-ranker, AC-03
-  drift > 0.30). The format is **proposed, not agreed**; the pod still needs to agree it (D-07).
+- **Fixtures and scenarios.** `docs/pod-interface/fixtures.json` is the single copy: the app
+  reseeds from it (`FIXTURES_PATH`), the contract suite reads it (`CONTRACT_FIXTURES`), and the
+  README table is checked against it. Systems and thresholds come from the spec's examples
+  (Section 5.2 system id, Model 5 loan-scorer and resume-ranker, AC-03 drift > 0.30). `scenarios`
+  encodes Model 5 Ex-1 to Ex-5 as phase-gated steps (pod-interface B-24). The format is
+  **proposed, not agreed**; the pod still needs to agree it (D-07), and that Ex-4's ledger check
+  of denied attempts is Phase 4.
 
 ## D-17: AC-01 cadence tolerance (REQ-01, AC-01, REQ-02)
 

@@ -92,6 +92,7 @@ services:
     volumes:
       - ./tester:/srv/tester
       - ./tests:/srv/tests
+      - ./docs:/srv/docs:ro
 
 volumes:
   pgdata:
