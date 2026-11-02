@@ -379,6 +379,7 @@ jobs:
           . "$RUNNER_TEMP/contract.env"
           docker compose exec -T \
             -e CONTRACT_SYSTEM_KEY -e CONTRACT_VIEWER_KEY -e CONTRACT_ADMIN_KEY \
+            -e CONTRACT_RESUME_RANKER_KEY \
             -e CONTRACT_BASE_URL=http://localhost:8000 \
             -e CONTRACT_SYSTEM_ID="$SYSTEM_ID" \
             -e CONTRACT_RECEIVER_BIND=0.0.0.0:8099 \
