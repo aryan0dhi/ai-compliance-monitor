@@ -291,7 +291,8 @@ in `app/modules/ledger/chain.py`, reimplemented in `scripts/verify_ledger_export
   `{webhook_id}` response).
 - SSRF rules: http(s) only (https in production), no credentials in the URL, every resolved
   address must be public, connections are pinned to the vetted address, no redirects, no proxies.
-  `WEBHOOK_ALLOW_PRIVATE_NETWORKS` relaxes the address rule outside production (local testing).
+  `WEBHOOK_ALLOW_PRIVATE_NETWORKS` relaxes the address rule outside production (local testing);
+  `WEBHOOK_PRIVATE_HOSTS` relaxes it only for the named hosts (the test deployment's tester).
 - Malformed or disallowed URLs get `400`. A failed verification ping gets `422` (Section 5).
 
 ## D-16: Test environment (Section 5.1 test routes, D-07)

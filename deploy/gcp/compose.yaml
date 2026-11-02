@@ -36,6 +36,8 @@ services:
       POSTGRES_PORT: "5432"
       POSTGRES_USER: compliance
       POSTGRES_DB: compliance
+      # The tester's webhook receiver (below) is on the compose network.
+      WEBHOOK_PRIVATE_HOSTS: tester
     depends_on:
       db:
         condition: service_healthy
@@ -56,6 +58,7 @@ services:
       POSTGRES_PORT: "5432"
       POSTGRES_USER: compliance
       POSTGRES_DB: compliance
+      WEBHOOK_PRIVATE_HOSTS: tester
     depends_on:
       api:
         condition: service_healthy
@@ -65,8 +68,8 @@ services:
   # runs the contract suite, so it needs a dev image (pytest). Keys for the target's /v1 API:
   # CONTRACT_SYSTEM_KEY / CONTRACT_VIEWER_KEY / CONTRACT_ADMIN_KEY / CONTRACT_RESUME_RANKER_KEY in
   # .env (issue-keys.sh), or
-  # per target in TESTER_TARGETS_FILE. Webhook checks are off: nothing here is reachable from a
-  # target's webhook delivery (docs/cross-team-testing.md section 2a).
+  # per target in TESTER_TARGETS_FILE. Webhook checks are off for other teams' systems, which
+  # can't reach this container, and on for our own, which delivers to tester:8099 (section 2a).
   tester:
     build:
       context: ../..
@@ -77,6 +80,8 @@ services:
     env_file: .env
     environment:
       CONTRACT_WEBHOOKS: "off"
+      TESTER_SELF_URLS: https://${SITE_ADDRESS},http://api:8000
+      TESTER_SELF_RECEIVER_URL: http://tester:8099/contract-hook
     restart: unless-stopped
 
   # Public entry point: automatic Let's Encrypt certificate for SITE_ADDRESS.

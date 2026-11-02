@@ -51,7 +51,7 @@ Give it keys for the target's `/v1` API: issue a set with `issue-keys.sh tester`
 `CONTRACT_SYSTEM_KEY` (loan-scorer), `CONTRACT_VIEWER_KEY` and `CONTRACT_ADMIN_KEY` to
 `/opt/compliance-monitor/deploy/gcp/.env` on the VM and run `sudo docker compose up -d tester`.
 To test our own system from it, use `target_url` `http://api:8000` (inside the VM) or the public
-URL. To test a podmate's system, either put their keys in `.env` for that run, or mount a
+URL; for those two the webhook checks (AC-02, AC-04) run too. To test a podmate's system, either put their keys in `.env` for that run, or mount a
 `TESTER_TARGETS_FILE` (§2a) into the tester container; the compose file mounts none by default.
 
 ## Operate

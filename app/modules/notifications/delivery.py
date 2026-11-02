@@ -119,19 +119,22 @@ class HttpWebhookSender:
         timeout_s: float,
         allow_private: bool,
         require_https: bool,
+        private_hosts: frozenset[str] = frozenset(),
         resolver: Resolver = resolve_addresses,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         self._timeout = httpx.Timeout(timeout_s)
         self._allow_private = allow_private
         self._require_https = require_https
+        self._private_hosts = private_hosts
         self._resolver = resolver
         self._transport = transport
 
     def send(self, url: str, body: bytes, secret: str) -> SendResult:
         try:
             target = parse_webhook_url(url, require_https=self._require_https)
-            addresses = self._resolver(target, allow_private=self._allow_private)
+            allow_private = self._allow_private or target.host.lower() in self._private_hosts
+            addresses = self._resolver(target, allow_private=allow_private)
         except UnsafeWebhookUrl as exc:
             return SendResult(ok=False, status_code=None, error=str(exc))
 
@@ -189,4 +192,5 @@ def sender_from_settings() -> HttpWebhookSender:
         timeout_s=settings.webhook_timeout_s,
         allow_private=settings.webhook_private_networks_allowed,
         require_https=settings.webhook_https_required,
+        private_hosts=settings.webhook_private_host_names,
     )

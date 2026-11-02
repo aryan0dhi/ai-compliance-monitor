@@ -467,3 +467,32 @@ def test_document_operations_are_implemented():
     ours = {(m, p) for p, item in tester_main.app.openapi()["paths"].items() for m in item}
     assert DOC["openapi"].startswith("3.1")
     assert {(m, p) for p, item in DOC["paths"].items() for m in item} <= ours
+
+
+SELF = "https://monitor.example"
+
+
+@pytest.mark.parametrize(
+    ("target", "webhooks"),
+    [(SELF, True), ("HTTP://API:8000", True), ("https://other.example", False)],
+)
+def test_own_deployment_gets_webhook_checks(monkeypatch, target, webhooks):
+    monkeypatch.setenv("TESTER_SELF_URLS", f"{SELF}/, http://api:8000")
+    monkeypatch.setenv("TESTER_SELF_RECEIVER_URL", "http://tester:8099/contract-hook")
+    monkeypatch.delenv("TESTER_TARGETS_FILE", raising=False)
+    expected = {
+        "CONTRACT_WEBHOOKS": "on",
+        "CONTRACT_RECEIVER_BIND": "0.0.0.0:8099",
+        "CONTRACT_RECEIVER_URL": "http://tester:8099/contract-hook",
+    }
+    assert tester_main.target_overrides(target) == (expected if webhooks else {})
+
+
+def test_targets_file_overrides_the_self_defaults(monkeypatch, tmp_path):
+    targets = tmp_path / "targets.json"
+    targets.write_text(json.dumps({SELF: {"CONTRACT_WEBHOOKS": "off", "CONTRACT_SYSTEM_KEY": "k"}}))
+    monkeypatch.setenv("TESTER_SELF_URLS", SELF)
+    monkeypatch.setenv("TESTER_SELF_RECEIVER_URL", "http://tester:8099/contract-hook")
+    monkeypatch.setenv("TESTER_TARGETS_FILE", str(targets))
+    out = tester_main.target_overrides(SELF)
+    assert out["CONTRACT_WEBHOOKS"] == "off" and out["CONTRACT_SYSTEM_KEY"] == "k"
