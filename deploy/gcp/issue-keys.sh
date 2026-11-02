@@ -10,7 +10,7 @@ cd /opt/compliance-monitor/deploy/gcp
 cli() { sudo docker compose exec -T api python -m app.cli "$@" 2>/dev/null; }
 key() { sed -n 's/^api_key: //p'; }
 
-# The baseline fixture systems (app/modules/testing/fixtures.py); /v1/test/reset keeps them.
+# The baseline fixture systems (docs/pod-interface/fixtures.json); /v1/test/reset keeps them.
 LOAN=550e8400-e29b-41d4-a716-446655440000
 RESUME=550e8400-e29b-41d4-a716-446655440001
 cli create-system --id "$LOAN" --name loan-scorer >/dev/null || true

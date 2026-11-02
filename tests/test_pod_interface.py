@@ -65,6 +65,23 @@ def test_document_shape():
     assert "notification" in SPEC["webhooks"]  # outgoing delivery payload is specified
 
 
+def test_every_documented_error_has_the_error_body():
+    def resolved(response):
+        ref = response.get("$ref")
+        return SPEC["components"]["responses"][ref.rsplit("/", 1)[1]] if ref else response
+
+    errors = [
+        (method, path, code, resolved(response))
+        for method, path, op in OPERATIONS
+        for code, response in op["responses"].items()
+        if int(code) >= 400
+    ]
+    assert errors
+    for method, path, code, response in errors:
+        schema = response["content"]["application/json"]["schema"]
+        assert schema == {"$ref": "#/components/schemas/Error"}, (method, path, code)
+
+
 def test_every_phase3_operation_is_implemented():
     app = create_app(Settings(enable_test_routes=True, app_env=AppEnv.TEST))
     ours = {(m.upper(), p) for p, item in app.openapi()["paths"].items() for m in item}

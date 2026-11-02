@@ -33,6 +33,8 @@ RUN if [ "$INSTALL_DEV" = "true" ]; then \
 COPY alembic.ini ./
 COPY alembic ./alembic
 COPY scripts ./scripts
+# Standard fixtures (B-20): reseeded by /v1/test/reset and read by the contract suite.
+COPY docs/pod-interface ./docs/pod-interface
 COPY tests ./tests
 # Tester service (uvicorn tester.main:app); only usable in dev images, which have pytest.
 COPY tester ./tester

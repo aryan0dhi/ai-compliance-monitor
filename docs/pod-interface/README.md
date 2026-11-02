@@ -45,8 +45,11 @@ deployment provides.
   (never `422` for these). `401` for a missing, unknown or revoked key, checked **before** the
   body, so an unauthenticated malformed request is `401`. `403` for the wrong role or system
   scope. `404` for an event id that names no event, malformed ids included. `409` for state
-  conflicts. `422` only when a webhook URL is refused or fails verification. Errors are
-  `{"detail": ...}` and never echo raw input. Ids are opaque strings of 1-64 characters from
+  conflicts. A disallowed webhook URL is `400`; `422` only when the verification ping fails.
+  `405` for a wrong method and `500` for a server fault. Every error, those included and `404`
+  for an unknown path too, is JSON `{"detail": ...}`: a string, or for `400` a list of
+  `{loc, msg, type}`. It never echoes raw input, URLs or exception text. The course routes
+  (`/test/setup`, `/test/report`) keep their own `{message, source}` body. Ids are opaque strings of 1-64 characters from
   `[A-Za-z0-9._~-]`, not UUIDs. A well-formed `system_id` filter that names no system gives an
   empty `200`; a body `system_id` that is not the key's own is `403`; an id outside the
   pattern or length is `400`. *Proposed, awaiting pod agreement.*
@@ -148,9 +151,11 @@ deployment provides.
 
 ### Repeatable testing
 
-- **B-20 Standard fixtures (Proposed, D-16).** After `POST /v1/test/reset` every implementation
-  holds exactly these systems and thresholds and nothing else. Thresholds apply to samples
-  timestamped after 2000-01-01T00:00:00Z.
+- **B-20 Standard fixtures (Proposed, D-16).** [fixtures.json](fixtures.json) is the source: copy
+  that file, don't retype the table. After `POST /v1/test/reset` every implementation holds
+  exactly these systems and thresholds and nothing else, except that a system an account still
+  points to stays, without thresholds. Thresholds apply to samples timestamped after
+  2000-01-01T00:00:00Z.
 
   | System | `system_id` | Interval | Gap after | Metric | Type | Breaches when |
   |---|---|---|---|---|---|---|
@@ -158,7 +163,7 @@ deployment provides.
   | loan-scorer | same | | | `drift_score` | drift | `> 0.30` |
   | resume-ranker | `550e8400-e29b-41d4-a716-446655440001` | 300 s | 3 intervals | `psi` | drift | `> 0.30` |
 
-  Reset also removes all events, samples, webhooks, notifications, dispositions, reports and
+  A test checks that this table matches the file. Reset also removes all events, samples, webhooks, notifications, dispositions, reports and
   ledger entries, and sets the simulated clock back to real time. API keys stay valid.
 - **B-21 Settle time (Proposed).** Asynchronous effects (gap events, webhook deliveries,
   reminders, time-driven state changes) MUST be observable within **30 seconds of real time**
@@ -166,6 +171,13 @@ deployment provides.
   less is RECOMMENDED. Testers poll for up to 30 s before declaring a failure.
 - **Test routes.** `/v1/test/reset`, `/v1/test/clock/advance` and `GET /v1/test/clock` exist
   only in test deployments and MUST return `404` in production. The clock only moves forward.
+
+- **B-24 Scenarios (Proposed, D-16).** `scenarios` in [fixtures.json](fixtures.json) encodes Model 5
+  Ex-1 to Ex-5 as steps: `phase`, `at` (an ISO-8601 offset from the scenario's start on the
+  service clock; Model 5's wall-clock times are `label`s), `actor`, `action` and `expect`. A tester
+  runs the steps up to the highest phase in `GET /v1/meta` and reports the rest as deferred, never
+  skipped. A step with `needs: ["webhooks"]` also needs a reachable receiver. Ex-3 and Ex-5 are
+  covered by the AC-02 and AC-06 tests.
 
 ## Registry entry
 
@@ -185,7 +197,7 @@ Each team adds its deployment to the pod registry with:
 - **Schema conformance:** run Schemathesis (or any OpenAPI fuzzer) with this `openapi.yaml`
   against a deployment, using the team's keys.
 - **Behaviour:** this repository's black-box suite, `tests/contract/`, implements B-01 to B-06,
-  B-13, B-14, B-20 and B-21 over HTTP and writes a coverage report by REQ, AC, endpoint, Model 1
+  B-13, B-14, B-20 to B-22 and B-24 (Model 5 Ex-1, Ex-2 and Ex-4, up to Phase 3) over HTTP and writes a coverage report by REQ, AC, endpoint, Model 1
   state and Model 4 invariant (see [docs/cross-team-testing.md](../cross-team-testing.md)).
 
 ## Decisions for the pod
@@ -193,14 +205,14 @@ Each team adds its deployment to the pod registry with:
 | ID | Proposal | Why it matters to tests |
 |---|---|---|
 | D-04 | Identical repeat `200`, conflicting repeat `409` | Idempotency checks |
-| D-06 | `{items, total, limit, offset}` page envelope | Every list assertion |
+| D-06 | `{items, total, limit, offset}` page envelope; `{"detail"}` error body (B-22) | Every list and error assertion |
 | D-08 | Listing events isn't audited | AC-15 counts |
 | D-09 | One event per breaching sample (vs per episode) | Event and notification counts in AC-03/04/16 |
 | D-11 | Gap at exactly `k × interval` (inclusive) | AC-02 boundary |
 | D-12 | Gap states `GAP_OPEN`/`REVIEWER_NOTIFIED`/`GAP_CLOSED` | State assertions on gaps |
 | D-13 | Admin-only webhooks and test routes | Which key a harness uses |
 | D-14 | Common ledger hash rule (B-06) | Independent re-verification (Q4.3) |
-| D-16 | Standard fixtures (B-20) | Every test's inputs |
+| D-16 | Standard fixtures and scenarios file (B-20, B-24) | Every test's inputs |
 | new | `/v1/meta`, `/v1/me`, `GET /v1/test/clock`, report submission, 30 s settle time (B-21) | Discovery, AC-15 identity, timing |
 | D-03 | Whether `REPORT_READY`/`SUBMITTED` are visible states | Phase 5 assertions |
 

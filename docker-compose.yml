@@ -36,6 +36,7 @@ services:
       - ./app:/srv/app
       - ./alembic:/srv/alembic
       - ./tests:/srv/tests
+      - ./docs:/srv/docs:ro
     depends_on:
       db:
         condition: service_healthy
@@ -59,6 +60,7 @@ services:
       POSTGRES_PORT: "5432"
     volumes:
       - ./app:/srv/app
+      - ./docs:/srv/docs:ro
     depends_on:
       api:
         condition: service_healthy
@@ -78,6 +80,7 @@ services:
       CONTRACT_SYSTEM_KEY: ${CONTRACT_SYSTEM_KEY:-}
       CONTRACT_VIEWER_KEY: ${CONTRACT_VIEWER_KEY:-}
       CONTRACT_ADMIN_KEY: ${CONTRACT_ADMIN_KEY:-}
+      CONTRACT_RESUME_RANKER_KEY: ${CONTRACT_RESUME_RANKER_KEY:-}
       CONTRACT_SYSTEM_ID: ${CONTRACT_SYSTEM_ID:-550e8400-e29b-41d4-a716-446655440000}
       # Webhook checks need a receiver the target's worker can reach, e.g. on this network:
       # CONTRACT_WEBHOOKS=on CONTRACT_RECEIVER_BIND=0.0.0.0:8099
@@ -90,6 +93,7 @@ services:
     volumes:
       - ./tester:/srv/tester
       - ./tests:/srv/tests
+      - ./docs:/srv/docs:ro
 
 volumes:
   pgdata:

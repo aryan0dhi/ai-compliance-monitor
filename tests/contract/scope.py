@@ -21,3 +21,5 @@ ENDPOINTS = [
 MODEL1 = ["FLAGGED", "DENIED", "GAP_OPEN", "REVIEWER_NOTIFIED", "GAP_CLOSED"]
 # Model 4 invariants checkable through the API in Phase 3.
 MODEL4 = ["INV-7", "INV-8", "INV-10", "INV-12", "INV-13"]
+# Model 5 worked examples (docs/pod-interface/fixtures.json scenarios).
+MODEL5 = ["Ex-1", "Ex-2", "Ex-3", "Ex-4", "Ex-5"]

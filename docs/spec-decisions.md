@@ -38,7 +38,8 @@ Ordered by impact on cross-team testing:
    how many events and notifications AC-03/AC-04/AC-16 should expect.
 3. **D-04**: status codes for duplicate submissions (`200`/`409` now).
 4. **D-07**: how thresholds are configured, and the shared fixture format for
-   `/v1/test/reset`.
+   `/v1/test/reset`. Proposed: `docs/pod-interface/fixtures.json`, with the Model 5 scenarios
+   (D-16).
 5. **D-01**: shared fixtures must say whether each threshold is `above` or `below`.
 6. **D-03**: state names before Phase 4 (`DISPOSITIONED` vs `CLASSIFIED`, etc.).
 7. **D-08**: whether listing events writes ledger entries.
@@ -143,12 +144,17 @@ until that event's `retain_until`.
 Implemented as below and open to change by pod agreement. Each choice favors the strictest
 reading of the contract, or least privilege, when the contract is silent.
 
+The page envelope and the error body are interim and codified in issue #25 (pod-interface B-22),
+**not agreed**. Open: whether `total` is required; whether `400` keeps a list of `{loc, msg, type}`
+(FastAPI's own shape, minus the input); a disallowed webhook URL as `400` or `422`.
+
 | Topic | Section 5 says | Interim behavior |
 |---|---|---|
 | Pagination format | "paginated array of Event summaries" | `limit` (1–200, default 50) and `offset` (0 to 2⁶³−1, PostgreSQL's bigint limit) query params. Response `{"items": [...], "total", "limit", "offset"}` |
 | List ordering | not specified | Newest `detected_at` first; `event_id` breaks ties so pages are stable |
 | Event summary fields | not specified | `event_id, system_id, type, state, detected_at, metric_name` |
 | Invalid list query (bad `state`, naive `since`, `limit=0`, ...) | only `401` listed | `400`, same as malformed bodies |
+| Error body | not specified | `{"detail": <string>}` for every error status including `404` (unknown path), `405`, `500` (fixed text, traceback only in the log) and `501`; `400` validation errors list `{loc, msg, type}`. Never echoes input, URLs or exception text |
 | Who may read events | only `401` listed | `viewer`, `reviewer`, `admin`. Monitored-system keys get `403` (they only submit metrics) |
 | Who may submit metrics | system keys "are used for metric submission" | Only a system key whose `system_id` matches the body. Human keys get `403` |
 | Malformed `event_id` in path | `404` if it doesn't exist | `404` (an id that is not an event's id can't exist) |
@@ -295,10 +301,17 @@ in `app/modules/ledger/chain.py`, reimplemented in `scripts/verify_ledger_export
   it for up to 1 s. `advance` takes a JSON integer `0 ≤ seconds ≤ 10 years`. `GET /v1/test/clock`
   (an addition) reads it.
 - **Reset.** Truncates events, metrics, thresholds, webhooks, notifications and the ledger,
-  clears `last_seen_at`, reseeds the baseline fixtures (app/modules/testing/fixtures.py) and sets
-  the clock offset back to 0. Accounts and API keys are kept, so testers' keys keep working.
-- **Fixtures.** Taken from the spec's examples (Section 5.2 system id, Model 5 loan-scorer and
-  resume-ranker, AC-03 drift > 0.30) until the pod agrees a shared format (D-07).
+  clears `last_seen_at`, reseeds the fixtures and sets the clock offset back to 0. Systems not in
+  the fixtures are deleted, so the fixture set is exact. Accounts and API keys are kept, so
+  testers' keys keep working; a system with an account is kept too, without thresholds (open:
+  delete such accounts and keys instead?).
+- **Fixtures and scenarios.** `docs/pod-interface/fixtures.json` is the single copy: the app
+  reseeds from it (`FIXTURES_PATH`), the contract suite reads it (`CONTRACT_FIXTURES`), and the
+  README table is checked against it. Systems and thresholds come from the spec's examples
+  (Section 5.2 system id, Model 5 loan-scorer and resume-ranker, AC-03 drift > 0.30). `scenarios`
+  encodes Model 5 Ex-1 to Ex-5 as phase-gated steps (pod-interface B-24). The format is
+  **proposed, not agreed**; the pod still needs to agree it (D-07), and that Ex-4's ledger check
+  of denied attempts is Phase 4.
 
 ## D-17: AC-01 cadence tolerance (REQ-01, AC-01, REQ-02)
 

@@ -91,15 +91,15 @@ def ingest_metric(
     with uow:
         system = uow.systems.get(submission.system_id)
         if system is None:
-            raise UnknownSystemError(str(submission.system_id))
+            raise UnknownSystemError("unknown system")
 
         threshold = threshold_in_force(
             uow.thresholds, submission.system_id, submission.metric_name, submission.sampled_at
         )
         if threshold is not None and threshold.metric_type != submission.metric_type:
             raise MetricTypeMismatchError(
-                f"{submission.metric_name} is configured as {threshold.metric_type}, "
-                f"got {submission.metric_type}"
+                f"metric_type does not match the configured threshold "
+                f"(configured: {threshold.metric_type})"
             )
 
         now = clock.now()

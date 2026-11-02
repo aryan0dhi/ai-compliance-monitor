@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from tests.contract.cadence import cadence_violations
+from tests.contract.scenarios import ScenarioRun, assert_error_body, parse, sample_time
 
 covers = pytest.mark.covers
 VERIFIER = Path(__file__).resolve().parents[2] / "scripts" / "verify_ledger_export.py"
@@ -26,14 +27,6 @@ def offline_verifier():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
-
-
-_SEQ = iter(range(1, 10**9))
-
-
-def sample_time() -> str:
-    # Unique per call, so repeats never collide on (system_id, metric_name, timestamp).
-    return (datetime.now(UTC) + timedelta(microseconds=next(_SEQ))).isoformat()
 
 
 def send(api, value, *, drift=True, as_="system", system_id=None, timestamp=None):
@@ -49,12 +42,9 @@ def send(api, value, *, drift=True, as_="system", system_id=None, timestamp=None
 
 
 def items(page):
-    """Section 5 says "paginated array"; accept a bare list or an {"items": [...]} envelope."""
-    return page if isinstance(page, list) else page["items"]
-
-
-def parse(ts: str) -> datetime:
-    return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    """The D-06 envelope {items, total, limit, offset}; a bare list is not accepted."""
+    assert isinstance(page, dict) and isinstance(page["items"], list), page
+    return page["items"]
 
 
 @pytest.fixture(scope="module")
@@ -110,6 +100,59 @@ def test_roles_are_enforced(api):
 def test_only_admins_register_webhooks(api):
     body = {"url": "https://example.com/hook", "event_types": ["flag_notification"]}
     assert api.call("POST", "/v1/webhooks", as_="viewer", json=body).status_code == 403
+
+
+SENTINEL = "contract-sentinel-7f3a"
+JSON_HEADERS = {"Content-Type": "application/json"}
+
+
+def _conflicting_duplicate(api):
+    resp, body = send(api, 0.1)
+    assert resp.status_code == 201, resp.text
+    return api.call("POST", "/v1/metrics", as_="system", json={**body, "value": 0.2})
+
+
+ERROR_CASES = {
+    400: [
+        lambda api: api.call(
+            "POST", "/v1/metrics", as_="system", content=b"{", headers=JSON_HEADERS
+        ),
+        lambda api: api.call(
+            "POST",
+            "/v1/metrics",
+            as_="system",
+            json={"system_id": SENTINEL, "metric_type": SENTINEL, "value": SENTINEL},
+        ),
+        lambda api: api.call("GET", "/v1/events", as_="viewer", params={"limit": SENTINEL}),
+    ],
+    401: [lambda api: api.call("GET", "/v1/events", as_=None)],
+    403: [lambda api: send(api, 0.1, as_="viewer")[0]],
+    404: [
+        lambda api: api.call("GET", f"/v1/events/{UNKNOWN_EVENT}", as_="viewer"),
+        lambda api: api.call("GET", f"/v1/events/{SENTINEL}", as_="viewer"),
+        lambda api: api.call("GET", f"/v1/{SENTINEL}", as_="viewer"),
+    ],
+    405: [lambda api: api.call("DELETE", "/v1/events", as_="viewer")],
+    409: [_conflicting_duplicate],
+}
+
+
+@covers(
+    reqs=["REQ-13"],
+    endpoints=["POST /v1/metrics", "GET /v1/events", "GET /v1/events/{id}"],
+    decision="D-06",
+)
+@pytest.mark.parametrize(
+    ("status", "case"),
+    [(s, c) for s, cases in ERROR_CASES.items() for c in cases],
+    ids=lambda v: str(v) if isinstance(v, int) else "case",
+)
+def test_error_body_on_each_status(api, test_routes, status, case):
+    """B-22: {"detail": ...} JSON on every error status, never echoing the request."""
+    resp = case(api)
+    assert resp.status_code == status, resp.text
+    assert_error_body(resp)
+    assert SENTINEL not in resp.text
 
 
 # --- REQ-01 / REQ-03: ingestion and flagging -----------------------------------------------------
@@ -177,6 +220,23 @@ def test_listing_filters_by_system_and_type(api, breach):
     assert items(none.json()) == []
 
 
+@covers(reqs=["REQ-03"], endpoints=["GET /v1/events"], decision="D-06")
+def test_events_page_envelope(api, breach):
+    assert send(api, round(api.target.drift_limit + 0.05, 6))[0].status_code == 201
+    first = api.call("GET", "/v1/events", as_="viewer", params={"limit": 1, "offset": 0})
+    assert first.status_code == 200, first.text
+    page = first.json()
+    assert set(page) == {"items", "total", "limit", "offset"}, page
+    assert (page["limit"], page["offset"]) == (1, 0) and len(page["items"]) == 1
+    assert page["total"] >= 2
+    second = api.call("GET", "/v1/events", as_="viewer", params={"limit": 1, "offset": 1}).json()
+    assert second["offset"] == 1 and second["total"] >= page["total"]
+    assert page["items"][0]["event_id"] != second["items"][0]["event_id"]
+    everything = items(api.call("GET", "/v1/events", as_="viewer", params={"limit": 200}).json())
+    detected = [parse(e["detected_at"]) for e in everything]
+    assert detected == sorted(detected, reverse=True)  # newest first
+
+
 # --- REQ-14 / REQ-06: audit trail and ledger -----------------------------------------------------
 
 
@@ -215,6 +275,7 @@ def export_all(api) -> list[dict]:
     acs=["AC-06"],
     endpoints=["GET /v1/ledger/verify", "GET /v1/ledger/export"],
     model4=["INV-7"],
+    model5=["Ex-5"],
     decision="D-14",
 )
 def test_ac06_ledger_verifies_and_an_edited_export_is_caught_offline(api, breach):
@@ -274,12 +335,12 @@ def open_gap(api) -> dict:
     known = set(gap_ids(api))
     assert send(api, 0.1)[0].status_code == 201  # last data now
 
-    # Boundary: withholding 2 intervals must NOT trigger.
-    advance_clock(api, 2 * interval)
+    # Boundary: withholding one interval fewer than the gap threshold must NOT trigger.
+    advance_clock(api, (api.target.gap_intervals - 1) * interval)
     time.sleep(GAP_SETTLE_S)
     assert set(gap_ids(api)) == known
 
-    # 3 intervals: a gap event appears.
+    # The full threshold (3 intervals in the fixtures): a gap event appears.
     advance_clock(api, interval)
 
     def new_gap():
@@ -296,7 +357,7 @@ def close_gap(api, gap: dict) -> None:
     api.wait_for(lambda: gap_ids(api)[gap["event_id"]]["state"] == "GAP_CLOSED", "GAP_CLOSED")
     detail = api.call("GET", f"/v1/events/{gap['event_id']}", as_="viewer").json()
     if "gap_duration_seconds" in detail:
-        assert detail["gap_duration_seconds"] >= 3 * api.target.interval_s
+        assert detail["gap_duration_seconds"] >= api.target.gap_intervals * api.target.interval_s
 
 
 @covers(
@@ -336,6 +397,7 @@ def test_ac01_one_hour_at_the_sampling_interval_opens_no_gap(api, test_routes):
     endpoints=["POST /v1/test/clock/advance", "POST /v1/test/reset", "GET /v1/events"],
     model1=["GAP_OPEN", "GAP_CLOSED"],
     model4=["INV-12"],
+    model5=["Ex-3"],
     decision="D-12",
 )
 def test_ac02_gap_after_three_missed_intervals_not_two(api, test_routes):
@@ -349,6 +411,7 @@ def test_ac02_gap_after_three_missed_intervals_not_two(api, test_routes):
     acs=["AC-02"],
     endpoints=["POST /v1/webhooks", "POST /v1/test/clock/advance"],
     model1=["REVIEWER_NOTIFIED"],
+    model5=["Ex-3"],
     decision="D-12",
 )
 def test_ac02_gap_notification_reaches_the_reviewer(api, receiver, test_routes):
@@ -366,6 +429,59 @@ def test_ac02_gap_notification_reaches_the_reviewer(api, receiver, test_routes):
         "state REVIEWER_NOTIFIED",
     )
     close_gap(api, gap)
+
+
+# --- Model 5 scenarios (docs/pod-interface/fixtures.json) ----------------------------------------
+
+
+def run_scenario(name, api, fixtures, receiver, test_routes, meta_phases, record_property):
+    """Runs the steps the target's phases cover; the rest are recorded as deferred, not skipped."""
+    deferred = ScenarioRun(api, fixtures, name, receiver, test_routes).run(meta_phases)
+    record_property("deferred_steps", deferred)
+
+
+@covers(
+    reqs=["REQ-03", "REQ-04", "REQ-14"],
+    endpoints=["POST /v1/metrics", "GET /v1/events/{id}", "GET /v1/events/{id}/audit"],
+    model1=["FLAGGED"],
+    model5=["Ex-1"],
+    decision="D-16",
+)
+def test_model5_ex1_serious_incident_flag(
+    api, fixtures, receiver, test_routes, meta_phases, record_property
+):
+    run_scenario("Ex-1", api, fixtures, receiver, test_routes, meta_phases, record_property)
+
+
+@covers(
+    reqs=["REQ-03"],
+    endpoints=["POST /v1/metrics", "GET /v1/events/{id}"],
+    model1=["FLAGGED"],
+    model5=["Ex-2"],
+    decision="D-16",
+)
+def test_model5_ex2_not_serious_flag(
+    api, fixtures, receiver, test_routes, meta_phases, record_property
+):
+    run_scenario("Ex-2", api, fixtures, receiver, test_routes, meta_phases, record_property)
+
+
+@covers(
+    reqs=["REQ-13", "REQ-14"],
+    endpoints=[
+        "POST /v1/metrics",
+        "GET /v1/events/{id}",
+        "GET /v1/events/{id}/audit",
+        "POST /v1/webhooks",
+    ],
+    model1=["DENIED"],
+    model5=["Ex-4"],
+    decision="D-16",
+)
+def test_model5_ex4_viewer_cannot_act_but_is_logged(
+    api, fixtures, receiver, test_routes, meta_phases, record_property
+):
+    run_scenario("Ex-4", api, fixtures, receiver, test_routes, meta_phases, record_property)
 
 
 @covers(reqs=["REQ-06"], endpoints=["GET /v1/ledger/verify"], model4=["INV-7"])

@@ -313,8 +313,9 @@ jobs:
       group: ${{ github.workflow }}-contract-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
       cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
     env:
-      # The baseline fixture system (app/modules/testing/fixtures.py).
+      # The fixture systems in docs/pod-interface/fixtures.json.
       SYSTEM_ID: 550e8400-e29b-41d4-a716-446655440000
+      RESUME_RANKER_ID: 550e8400-e29b-41d4-a716-446655440001
 
     steps:
       - name: Checkout repository
@@ -362,10 +363,12 @@ jobs:
             echo "export $var=$k" >> "$RUNNER_TEMP/contract.env"
           }
           cli create-system --id "$SYSTEM_ID" --name loan-scorer > /dev/null || true
+          cli create-system --id "$RESUME_RANKER_ID" --name resume-ranker > /dev/null || true
           : > "$RUNNER_TEMP/contract.env"
           issue CONTRACT_SYSTEM_KEY --name ci-system --role system --system-id "$SYSTEM_ID"
           issue CONTRACT_VIEWER_KEY --name ci-viewer --role viewer
           issue CONTRACT_ADMIN_KEY --name ci-admin --role admin
+          issue CONTRACT_RESUME_RANKER_KEY --name ci-resume-ranker --role system --system-id "$RESUME_RANKER_ID"
 
       # Runs inside the api container so the worker container can reach the suite's webhook
       # receiver at api:8099 (the worker delivers webhooks, not the api).
@@ -376,6 +379,7 @@ jobs:
           . "$RUNNER_TEMP/contract.env"
           docker compose exec -T \
             -e CONTRACT_SYSTEM_KEY -e CONTRACT_VIEWER_KEY -e CONTRACT_ADMIN_KEY \
+            -e CONTRACT_RESUME_RANKER_KEY \
             -e CONTRACT_BASE_URL=http://localhost:8000 \
             -e CONTRACT_SYSTEM_ID="$SYSTEM_ID" \
             -e CONTRACT_RECEIVER_BIND=0.0.0.0:8099 \
@@ -402,7 +406,7 @@ jobs:
         run: |
           set -eu
           . "$RUNNER_TEMP/contract.env"
-          export CONTRACT_SYSTEM_KEY CONTRACT_VIEWER_KEY CONTRACT_ADMIN_KEY
+          export CONTRACT_SYSTEM_KEY CONTRACT_VIEWER_KEY CONTRACT_ADMIN_KEY CONTRACT_RESUME_RANKER_KEY
           export CONTRACT_SYSTEM_ID="$SYSTEM_ID" CONTRACT_WEBHOOKS=on \
             CONTRACT_RECEIVER_BIND=0.0.0.0:8099 \
             CONTRACT_RECEIVER_URL=http://tester:8099/contract-hook

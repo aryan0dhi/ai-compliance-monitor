@@ -1,0 +1,128 @@
+{
+  "status": "proposed",
+  "version": 1,
+  "valid_from": "2000-01-01T00:00:00Z",
+  "systems": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "name": "loan-scorer",
+      "sampling_interval_s": 300,
+      "gap_missed_intervals": 3,
+      "thresholds": [
+        {"metric_name": "accuracy", "metric_type": "performance", "direction": "below", "limit": "0.70"},
+        {"metric_name": "drift_score", "metric_type": "drift", "direction": "above", "limit": "0.30"}
+      ]
+    },
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440001",
+      "name": "resume-ranker",
+      "sampling_interval_s": 300,
+      "gap_missed_intervals": 3,
+      "thresholds": [
+        {"metric_name": "psi", "metric_type": "drift", "direction": "above", "limit": "0.30"}
+      ]
+    }
+  ],
+  "scenarios": {
+    "Ex-1": {
+      "title": "Serious incident, revised upward",
+      "system": "loan-scorer",
+      "reqs": ["REQ-03", "REQ-04", "REQ-07", "REQ-08b", "REQ-09", "REQ-10", "REQ-11", "REQ-12", "REQ-15"],
+      "steps": [
+        {"id": "breach", "phase": 3, "at": "PT0S", "label": "d0 09:00", "actor": "system", "action": "submit_metric",
+         "args": {"metric": "accuracy", "value": 0.61},
+         "expect": {"status": 201, "flagged": true}},
+        {"id": "flagged", "phase": 3, "at": "PT0S", "actor": "viewer", "action": "get_event",
+         "expect": {"type": "threshold_breach", "state": "FLAGGED", "metric_name": "accuracy",
+                    "observed_value": 0.61, "threshold_value": "fixture", "detected_in_call": true}},
+        {"id": "flag-audited", "phase": 3, "at": "PT0S", "actor": "viewer", "action": "get_audit",
+         "expect": {"actions_include": ["FLAGGED"]}},
+        {"id": "notified", "phase": 3, "at": "PT6M", "label": "d0 09:06", "actor": "system", "action": "await_webhook",
+         "needs": ["webhooks"],
+         "expect": {"notification_type": "flag_notification", "within": "PT15M"}},
+        {"id": "under-review", "phase": 4, "at": "PT6M", "actor": "reviewer", "action": "get_event",
+         "expect": {"state": "UNDER_REVIEW", "harm_fields": {"fundamental_rights": "prefilled", "others": "blank"}}},
+        {"id": "confirm-fields", "phase": 4, "at": "PT4H", "label": "d0 13:00", "actor": "reviewer", "action": "confirm_fields",
+         "args": {"confirmed": ["fundamental_rights"], "not_applicable": ["health_safety", "critical_infrastructure", "property_environment"]}},
+        {"id": "assign-other-serious", "phase": 4, "at": "PT4H", "actor": "reviewer", "action": "disposition",
+         "args": {"tier": "OTHER_SERIOUS"},
+         "expect": {"state": "DISPOSITIONED", "deadline_utc": "P15DT4H"}},
+        {"id": "revise-to-death", "phase": 4, "at": "P3D", "label": "d3", "actor": "reviewer", "action": "disposition",
+         "args": {"tier": "DEATH"},
+         "expect": {"deadline_utc": "P10DT4H", "dispositions": 2, "second_supersedes_first": true}},
+        {"id": "reminders", "phase": 4, "at": "P10DT4H", "actor": "viewer", "action": "await_reminders",
+         "needs": ["webhooks"],
+         "args": {"window_start": "PT4H", "window_end": "P10DT4H"},
+         "expect": {"fractions": [0.5, 0.8, 1.0]}},
+        {"id": "report", "phase": 5, "at": "P10DT4H", "actor": "reviewer", "action": "get_report",
+         "expect": {"non_null": ["detected_at", "determination_at", "assembled_at"]}}
+      ]
+    },
+    "Ex-2": {
+      "title": "Assessed not serious",
+      "system": "resume-ranker",
+      "reqs": ["REQ-03", "REQ-08a", "REQ-08b"],
+      "steps": [
+        {"id": "breach", "phase": 3, "at": "PT0S", "label": "d0", "actor": "system", "action": "submit_metric",
+         "args": {"metric": "psi", "value": 0.34},
+         "expect": {"status": 201, "flagged": true}},
+        {"id": "flagged", "phase": 3, "at": "PT0S", "actor": "viewer", "action": "get_event",
+         "expect": {"type": "threshold_breach", "state": "FLAGGED", "metric_name": "psi",
+                    "observed_value": 0.34, "threshold_value": "fixture", "detected_in_call": true}},
+        {"id": "blank-rationale", "phase": 4, "at": "PT1H", "actor": "reviewer", "action": "disposition",
+         "args": {"tier": "NOT_SERIOUS", "rationale": ""},
+         "expect": {"status": 400, "state_unchanged": true}},
+        {"id": "not-serious", "phase": 4, "at": "PT1H", "actor": "reviewer", "action": "disposition",
+         "args": {"tier": "NOT_SERIOUS", "rationale": "seasonal shift, no user impact"},
+         "expect": {"state": "CLOSED", "deadline_utc": null, "escalations": 0}},
+        {"id": "no-report", "phase": 5, "at": "PT1H", "actor": "reviewer", "action": "get_report",
+         "expect": {"status": 409}}
+      ]
+    },
+    "Ex-3": {
+      "title": "Monitoring gap",
+      "system": "loan-scorer",
+      "reqs": ["REQ-01", "REQ-02"],
+      "steps": [
+        {"id": "last-sample", "phase": 3, "at": "PT0S", "label": "10:00", "actor": "system", "action": "submit_metric",
+         "args": {"metric": "accuracy", "value": 0.9}},
+        {"id": "gap-opens", "phase": 3, "at": "PT15M", "label": "10:15", "actor": "viewer", "action": "await_gap",
+         "expect": {"missed_intervals": 3}},
+        {"id": "resumes", "phase": 3, "at": "PT1H40M", "label": "11:40", "actor": "system", "action": "submit_metric",
+         "args": {"metric": "accuracy", "value": 0.9},
+         "expect": {"state": "GAP_CLOSED", "gap_duration": "PT1H40M"}}
+      ],
+      "note": "Covered by the AC-02 contract tests, which use the interval and missed-interval count from the system above; the 1 h 40 m duration is not asserted."
+    },
+    "Ex-4": {
+      "title": "Failure: unauthorized and premature advance",
+      "system": "loan-scorer",
+      "reqs": ["REQ-07", "REQ-08a", "REQ-13", "REQ-14"],
+      "setup": {"scenario": "Ex-1", "steps": ["breach"]},
+      "steps": [
+        {"id": "viewer-opens", "phase": 3, "at": "PT0S", "actor": "viewer", "action": "get_event",
+         "expect": {"status": 200, "audit_adds": {"action": "VIEW", "count": 1}}},
+        {"id": "viewer-denied", "phase": 3, "at": "PT0S", "actor": "viewer", "action": "attempt",
+         "args": {"calls": ["POST /v1/webhooks", "POST /v1/metrics"]},
+         "expect": {"status": 403, "state": "FLAGGED", "audit_adds": {"count": 0}}},
+        {"id": "viewer-tier", "phase": 4, "at": "PT0S", "actor": "viewer", "action": "disposition",
+         "args": {"tier": "DEATH"},
+         "expect": {"status": 403, "ledger_records_attempt": true}},
+        {"id": "premature-report", "phase": 4, "at": "PT1H", "actor": "reviewer", "action": "get_report",
+         "expect": {"status": 409, "state": "UNDER_REVIEW", "ledger_records_attempt": true}}
+      ]
+    },
+    "Ex-5": {
+      "title": "Failure: tamper",
+      "system": "loan-scorer",
+      "reqs": ["REQ-06"],
+      "steps": [
+        {"id": "edit-row", "phase": 3, "at": "PT0S", "actor": "viewer", "action": "tamper_export",
+         "expect": {"offline_verifier_valid": false}},
+        {"id": "nightly-alert", "phase": 5, "at": "PT0S", "actor": "admin", "action": "await_alert",
+         "expect": {"severity": "critical"}}
+      ],
+      "note": "Covered by the AC-06 contract test, which edits an exported entry and re-verifies it offline."
+    }
+  }
+}

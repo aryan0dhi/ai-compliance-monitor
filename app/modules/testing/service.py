@@ -2,18 +2,19 @@
 
 from uuid import uuid4
 
-from sqlalchemy import delete, text, update
+from sqlalchemy import delete, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 
 from app.core.config import get_settings
 from app.db.uow import UnitOfWork
+from app.modules.auth.models import AppUser
 from app.modules.systems.models import MonitoredSystem
-from app.modules.testing.fixtures import BASELINE_SYSTEMS, FIXTURE_VALID_FROM
+from app.modules.testing.fixtures import FIXTURE_VALID_FROM, baseline_systems
 from app.modules.testing.models import SimulatedClockState
 from app.modules.thresholds.models import ThresholdVersion
 
 # Every table holding events, metrics, notifications or their audit trail. Accounts and API keys
-# are kept, so testers' keys survive a reset; monitored systems are kept and reseeded.
+# are kept, so testers' keys survive a reset; monitored systems are reseeded from the fixtures.
 RESET_TABLES = (
     "notification_delivery",
     "notification",
@@ -33,6 +34,9 @@ def reset_test_environment(uow: UnitOfWork) -> None:
     """Clear all events, metrics, webhooks and ledger entries, reseed the baseline fixtures and
     set the simulated clock back to real time. One transaction: all or nothing.
 
+    Systems outside the fixtures are deleted, except those a system account still points to:
+    those stay, without thresholds (D-16).
+
     Only possible in the test environment: this deliberately breaks the append-only ledger.
     """
     if not get_settings().test_routes_enabled:
@@ -43,7 +47,8 @@ def reset_test_environment(uow: UnitOfWork) -> None:
             raise RuntimeError("reset needs a database session")
         session.execute(text(f"TRUNCATE {', '.join(RESET_TABLES)}"))
         session.execute(update(MonitoredSystem).values(last_seen_at=None))
-        for fixture in BASELINE_SYSTEMS:
+        fixtures = baseline_systems()
+        for fixture in fixtures:
             values = {
                 "name": fixture.name,
                 "sampling_interval_s": fixture.sampling_interval_s,
@@ -66,5 +71,13 @@ def reset_test_environment(uow: UnitOfWork) -> None:
                         valid_from=FIXTURE_VALID_FROM,
                     )
                 )
+        session.execute(
+            delete(MonitoredSystem).where(
+                MonitoredSystem.id.not_in([f.id for f in fixtures]),
+                MonitoredSystem.id.not_in(
+                    select(AppUser.system_id).where(AppUser.system_id.isnot(None))
+                ),
+            )
+        )
         session.execute(delete(SimulatedClockState))
         session.flush()
