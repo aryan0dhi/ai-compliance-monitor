@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     # Allow webhook URLs on private, loopback or link-local addresses (local development only).
     # Ignored when APP_ENV=production, which also requires https.
     webhook_allow_private_networks: bool = False
+    # Comma-separated host names that may resolve to private addresses, e.g. "tester" so the
+    # hosted tester's receiver on the compose network can be registered. Ignored in production.
+    webhook_private_hosts: str = ""
 
     @model_validator(mode="after")
     def _poll_faster_than_notification_deadline(self) -> "Settings":
@@ -63,6 +66,14 @@ class Settings(BaseSettings):
     @property
     def webhook_private_networks_allowed(self) -> bool:
         return self.webhook_allow_private_networks and self.app_env != AppEnv.PRODUCTION
+
+    @property
+    def webhook_private_host_names(self) -> frozenset[str]:
+        if self.app_env == AppEnv.PRODUCTION:
+            return frozenset()
+        return frozenset(
+            h.strip().lower() for h in self.webhook_private_hosts.split(",") if h.strip()
+        )
 
     @property
     def webhook_https_required(self) -> bool:

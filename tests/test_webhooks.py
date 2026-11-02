@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.clock import get_clock
+from app.core.config import AppEnv, Settings
 from app.db.uow import get_uow
 from app.main import create_app
 from app.modules.auth.interface import Role, get_principal
@@ -225,6 +226,33 @@ class TestSender:
         )
         result = sender.send("http://127.0.0.1:9/", b"{}", "s")
         assert not result.ok and "private" in result.error
+
+    def test_only_named_private_hosts_may_resolve_privately(self):
+        seen: dict[str, bool] = {}
+
+        def resolver(target, allow_private):
+            seen[target.host] = allow_private
+            raise UnsafeWebhookUrl("stop")
+
+        sender = HttpWebhookSender(
+            timeout_s=2,
+            allow_private=False,
+            require_https=False,
+            private_hosts=frozenset({"tester"}),
+            resolver=resolver,
+        )
+        sender.send("http://Tester:8099/hook", b"{}", "s")
+        sender.send("http://db:5432/", b"{}", "s")
+        assert seen == {"tester": True, "db": False}
+
+
+@pytest.mark.parametrize(
+    ("app_env", "expected"),
+    [(AppEnv.TEST, frozenset({"tester", "other"})), (AppEnv.PRODUCTION, frozenset())],
+)
+def test_private_hosts_setting_is_ignored_in_production(app_env, expected):
+    settings = Settings(app_env=app_env, webhook_private_hosts=" Tester, other ,")
+    assert settings.webhook_private_host_names == expected
 
 
 class _Receiver(BaseHTTPRequestHandler):
