@@ -8,7 +8,8 @@
 A separate app from the system (uvicorn tester.main:app). Sessions and reports are kept in
 memory until the tester stops. The target's /v1 keys come from this process's CONTRACT_*
 environment, or per target from the JSON file named by TESTER_TARGETS_FILE:
-{"<target_url>": {"CONTRACT_SYSTEM_KEY": "...", ...}}.
+{"<target_url>": {"CONTRACT_SYSTEM_KEY": "...", ...}}. For the targets in TESTER_SELF_URLS (our
+own deployment), the webhook checks run against a receiver at TESTER_SELF_RECEIVER_URL.
 """
 
 import json
@@ -23,6 +24,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 from fastapi import Depends, FastAPI, Request, status
@@ -93,12 +95,30 @@ def get_runner() -> Runner:
     return lambda target, overrides: run_suite(target, overrides=overrides, timeout_s=RUN_TIMEOUT_S)
 
 
-def target_overrides(target_url: str) -> dict[str, str]:
-    path = os.environ.get("TESTER_TARGETS_FILE")
-    if not path:
+def self_target_overrides(target_url: str) -> dict[str, str]:
+    """Webhooks on for our own deployment, whose API can reach this container's receiver."""
+    receiver = os.environ.get("TESTER_SELF_RECEIVER_URL")
+    self_urls = {
+        u.strip().rstrip("/").lower()
+        for u in os.environ.get("TESTER_SELF_URLS", "").split(",")
+        if u.strip()
+    }
+    if not receiver or target_url.lower() not in self_urls:
         return {}
-    targets = json.loads(Path(path).read_text(encoding="utf-8"))
-    return {k: str(v) for k, v in targets.get(target_url, {}).items()}
+    return {
+        "CONTRACT_WEBHOOKS": "on",
+        "CONTRACT_RECEIVER_BIND": f"0.0.0.0:{urlsplit(receiver).port or 80}",
+        "CONTRACT_RECEIVER_URL": receiver,
+    }
+
+
+def target_overrides(target_url: str) -> dict[str, str]:
+    out = self_target_overrides(target_url)
+    path = os.environ.get("TESTER_TARGETS_FILE")
+    if path:
+        targets = json.loads(Path(path).read_text(encoding="utf-8"))
+        out.update({k: str(v) for k, v in targets.get(target_url, {}).items()})
+    return out
 
 
 def error(status_code: int, message: str, source: str) -> JSONResponse:
