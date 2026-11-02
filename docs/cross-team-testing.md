@@ -197,7 +197,9 @@ Keys are never part of a URL or the registry.
 **Limits.** Sessions and reports are kept in memory until the tester stops. Each run is its own
 pytest process. Two sessions against the same target at once would reset each other's data, so
 run one session per target at a time. On the test deployment the webhook checks are skipped
-(`CONTRACT_WEBHOOKS=off`), because no target can deliver webhooks into the VM.
+(`CONTRACT_WEBHOOKS=off`) for other teams' systems, because they can't deliver webhooks into the
+VM. For our own system (`TESTER_SELF_URLS`) they run: the API delivers to the tester's receiver
+at `TESTER_SELF_RECEIVER_URL` on the compose network, allowed by `WEBHOOK_PRIVATE_HOSTS=tester`.
 
 **CI self-test.** The contract CI job also starts the tester and runs
 `scripts/check_testing_interface.py` against our own system, the way graders call the
