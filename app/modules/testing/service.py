@@ -21,6 +21,7 @@ RESET_TABLES = (
     "notification",
     "webhook",
     "ledger_entry",
+    "harm_field",
     "event",
     "threshold_version",
     "metric_sample",

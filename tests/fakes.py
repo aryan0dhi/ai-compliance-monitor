@@ -34,6 +34,7 @@ from app.modules.notifications.models import (
     Webhook,
 )
 from app.modules.notifications.outbox import build_notification
+from app.modules.review.models import HarmField, HarmFieldName
 from app.modules.systems.models import MonitoredSystem
 from app.modules.thresholds.models import ThresholdVersion
 
@@ -149,6 +150,23 @@ class FakeEventRepository:
         return matches[offset : offset + limit], len(matches)
 
 
+class FakeHarmFieldRepository:
+    def __init__(self) -> None:
+        self.rows: dict[tuple[UUID, str], HarmField] = {}
+
+    def add_all(self, fields: list[HarmField]) -> None:
+        for f in fields:
+            key = (f.event_id, f.name)
+            if key in self.rows:
+                raise ValueError(f"duplicate harm field {key}")  # the primary key in SQL
+            self.rows[key] = f
+
+    def for_event(self, event_id: UUID) -> list[HarmField]:
+        order = [n.value for n in HarmFieldName]
+        found = [f for (e, _), f in self.rows.items() if e == event_id]
+        return sorted(found, key=lambda f: order.index(f.name))
+
+
 class FakeAuthRepository:
     def __init__(self) -> None:
         self.users: dict[UUID, AppUser] = {}
@@ -258,6 +276,7 @@ class FakeUnitOfWork:
         self.metrics = FakeMetricRepository()
         self.thresholds = FakeThresholdRepository()
         self.events = FakeEventRepository()
+        self.harm_fields = FakeHarmFieldRepository()
         self.auth = FakeAuthRepository()
         self.ledger = FakeLedgerRepository()
         self.webhooks = FakeWebhookRepository()
@@ -271,6 +290,7 @@ class FakeUnitOfWork:
             self.metrics,
             self.thresholds,
             self.events,
+            self.harm_fields,
             self.auth,
             self.ledger,
             self.webhooks,
@@ -307,6 +327,7 @@ class FakeUnitOfWork:
         sampling_interval_s: int = 300,
         gap_missed_intervals: int = 3,
         last_seen_at: datetime | None = None,
+        harm_fields: list[str] | None = None,
     ) -> UUID:
         system_id = system_id or uuid4()
         self.systems.rows[system_id] = MonitoredSystem(
@@ -315,6 +336,7 @@ class FakeUnitOfWork:
             sampling_interval_s=sampling_interval_s,
             gap_missed_intervals=gap_missed_intervals,
             last_seen_at=last_seen_at,
+            harm_fields=harm_fields or [],
         )
         return system_id
 

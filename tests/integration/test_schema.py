@@ -309,6 +309,53 @@ class TestSystemHarmFields:
         )
 
 
+class TestHarmFieldConstraints:
+    """Migration 0005 (B-07): one row per event and field; confirmation needs a time."""
+
+    @pytest.fixture
+    def event_id(self, conn):
+        event_id = uuid.uuid4()
+        assert insert_event(conn, id=event_id)
+        return event_id
+
+    def harm(self, conn, event_id, **values) -> bool:
+        row = {"event_id": event_id, "name": "fundamental_rights", **values}
+        cols = ", ".join(row)
+        params = ", ".join(f":{k}" for k in row)
+        return not violates(conn, f"INSERT INTO harm_field ({cols}) VALUES ({params})", row)
+
+    def test_pending_by_default(self, conn, event_id):
+        assert self.harm(conn, event_id)
+        status = conn.execute(
+            text("SELECT status FROM harm_field WHERE event_id = :e"), {"e": event_id}
+        ).scalar()
+        assert status == "PENDING"
+
+    def test_one_row_per_event_and_field(self, conn, event_id):
+        assert self.harm(conn, event_id)
+        assert not self.harm(conn, event_id)
+
+    @pytest.mark.parametrize(
+        "values",
+        [
+            {"name": "reputation"},
+            {"status": "MAYBE"},
+            {"status": "CONFIRMED"},  # no confirmed_at
+            {"status": "PENDING", "confirmed_at": T0},
+            {"event_id": uuid.uuid4()},  # no such event
+        ],
+    )
+    def test_invalid_rows_rejected(self, conn, event_id, values):
+        assert not self.harm(conn, event_id, **values)
+
+    def test_confirmed_row_accepted(self, conn, event_id):
+        assert self.harm(conn, event_id, status="NOT_APPLICABLE", confirmed_at=T0)
+
+    def test_event_with_harm_fields_cannot_be_deleted(self, conn, event_id):
+        assert self.harm(conn, event_id)
+        assert violates(conn, "DELETE FROM event WHERE id = :e", {"e": event_id})
+
+
 def test_timestamps_round_trip_as_utc(conn):
     value = conn.execute(
         text("SELECT sampled_at FROM metric_sample WHERE system_id = :s"), {"s": SYS}

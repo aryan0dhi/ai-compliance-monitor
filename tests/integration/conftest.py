@@ -30,6 +30,7 @@ TABLES = [
     "notification",
     "webhook",
     "ledger_entry",
+    "harm_field",
     "event",
     "threshold_version",
     "metric_sample",
@@ -96,7 +97,7 @@ def make_uow(pg_sessionmaker):
 def seed(pg_sessionmaker):
     """Insert a monitored system and its drift/accuracy thresholds; returns their ids."""
 
-    def _seed(system_id: uuid.UUID | None = None):
+    def _seed(system_id: uuid.UUID | None = None, harm_fields: list[str] | None = None):
         system_id = system_id or uuid.uuid4()
         drift = ThresholdVersion(
             id=uuid.uuid4(),
@@ -119,7 +120,10 @@ def seed(pg_sessionmaker):
         with pg_sessionmaker.begin() as session:
             session.add(
                 MonitoredSystem(
-                    id=system_id, name=f"sys-{system_id.hex[:8]}", sampling_interval_s=300
+                    id=system_id,
+                    name=f"sys-{system_id.hex[:8]}",
+                    sampling_interval_s=300,
+                    harm_fields=harm_fields or [],
                 )
             )
             session.flush()
