@@ -7,13 +7,14 @@ from decimal import Decimal
 import pytest
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
+from alembic.script import ScriptDirectory
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 
 from app.db.models import Base
 from app.modules.events.models import retain_until_for
 from tests.conftest import T0
-from tests.integration.conftest import migrate, throwaway_database
+from tests.integration.conftest import alembic_config, migrate, throwaway_database
 
 # --- migrations ---------------------------------------------------------------------------------
 
@@ -26,7 +27,8 @@ def test_upgrade_downgrade_upgrade_round_trip(postgres_server_url):
         assert set(inspect(engine).get_table_names()) <= {"alembic_version"}
         migrate(engine)
         with engine.connect() as conn:
-            assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0003"
+            version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
+        assert version == ScriptDirectory.from_config(alembic_config(None)).get_current_head()
 
 
 def test_models_and_migrations_have_no_drift(pg_engine):
