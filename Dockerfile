@@ -8,6 +8,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /srv
 
+# Apply Debian security updates the base image doesn't have yet, so fixed OS CVEs don't fail the
+# Trivy scan while we wait for a new python:3.12-slim (e.g. zlib1g CVE-2026-85091, 2026-11-17).
+RUN apt-get update \
+    && apt-get upgrade --yes --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+
 # Set to "true" for local development / CI images (adds pytest, httpx, ruff).
 ARG INSTALL_DEV=false
 # Set to "true" for a cross-team test deployment, so GET /test/report can measure code coverage
