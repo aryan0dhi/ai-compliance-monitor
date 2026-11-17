@@ -9,6 +9,7 @@ to [spec-decisions.md](spec-decisions.md).
 | `0001` | (baseline, empty) | |
 | `0002` | `monitored_system`, `metric_sample`, `threshold_version`, `event` | REQ-01, REQ-03, REQ-05 (storage only) |
 | `0003` | `app_user`, `api_key`, `ledger_entry`, `webhook`, `notification`, `notification_delivery`, `simulated_clock`, `worker_heartbeat`; gap columns/states on `event`; `gap_missed_intervals` on `monitored_system` | REQ-02, REQ-04, REQ-06, REQ-13, REQ-14 |
+| `0004` | `harm_fields` on `monitored_system` | REQ-07 (D-20) |
 
 ## Diagram
 
@@ -24,6 +25,8 @@ erDiagram
         uuid id PK
         text name UK
         int sampling_interval_s "default 300, > 0"
+        int gap_missed_intervals "default 3, > 0"
+        text_array harm_fields "Art. 3(49) fields, default empty"
         timestamptz last_seen_at "nullable"
         timestamptz created_at
     }
@@ -85,8 +88,10 @@ erDiagram
 One row per monitored high-risk AI system.
 - `sampling_interval_s`: REQ-01 configurable sampling interval (default 300 s = 5 min).
 - `last_seen_at`: updated by metric ingestion (REQ-01). The monitoring-gap sweeper (REQ-02) reads it.
-- Not here yet: REQ-02 gap-timeout settings and REQ-13 API keys. Their owners add them in their own
-  migrations (a separate `api_key` table referencing `monitored_system.id` is the expected shape).
+- `gap_missed_intervals`: REQ-02 gap timeout, in sampling intervals (migration 0003).
+- `harm_fields`: the Art. 3(49) fields this system's use can affect (REQ-07, D-20, migration 0004).
+  A breach prefills these fields' evidence; the others start blank. `ck_monitored_system_harm_fields_known`
+  allows only the four field names. Empty by default.
 
 ### `metric_sample` (module `metrics`, REQ-01)
 Raw performance and drift metrics, one row per measurement.

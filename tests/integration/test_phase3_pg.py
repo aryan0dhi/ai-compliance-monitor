@@ -346,6 +346,7 @@ class TestTestEnvironment:
                     f.sampling_interval_s,
                 )
                 assert systems[f.id].gap_missed_intervals == f.gap_missed_intervals
+                assert systems[f.id].harm_fields == [h.value for h in f.harm_fields]  # D-20
             thresholds = {
                 (t.system_id, t.metric_name, t.metric_type, t.direction, t.limit_value)
                 for t in s.scalars(select(ThresholdVersion))

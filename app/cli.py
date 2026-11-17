@@ -19,6 +19,7 @@ from app.modules.auth.principal import Principal, Role
 from app.modules.auth.service import AccountError, create_key, create_user, revoke_key
 from app.modules.ledger.service import verify_ledger
 from app.modules.metrics.models import MetricType
+from app.modules.review.models import HarmFieldName
 from app.modules.systems.service import SystemConfigError, create_system
 from app.modules.thresholds.models import Direction
 from app.modules.thresholds.service import ThresholdConfigError, add_threshold_version
@@ -53,6 +54,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--id", type=UUID, help="fixed system id (default: random)")
     p.add_argument("--interval", type=int, default=300, help="sampling interval in seconds")
     p.add_argument("--gap-intervals", type=int, default=3, help="missed intervals = a gap")
+    p.add_argument(
+        "--harm-field",
+        action="append",
+        default=[],
+        choices=[h.value for h in HarmFieldName],
+        help="Art. 3(49) field this system can affect; prefilled on breaches (repeatable, D-20)",
+    )
 
     p = sub.add_parser("create-user", help="create an account and print its first API key")
     p.add_argument("--name", required=True)
@@ -88,6 +96,7 @@ def run(argv: Sequence[str], uow_factory=get_uow) -> int:
                 sampling_interval_s=args.interval,
                 gap_missed_intervals=args.gap_intervals,
                 system_id=args.id,
+                harm_fields=[HarmFieldName(h) for h in args.harm_field],
             )
             print(f"system_id: {system.id}")
         elif args.command in ("create-user", "create-key"):

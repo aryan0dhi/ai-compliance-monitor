@@ -8,6 +8,7 @@
       "name": "loan-scorer",
       "sampling_interval_s": 300,
       "gap_missed_intervals": 3,
+      "harm_fields": ["fundamental_rights"],
       "thresholds": [
         {"metric_name": "accuracy", "metric_type": "performance", "direction": "below", "limit": "0.70"},
         {"metric_name": "drift_score", "metric_type": "drift", "direction": "above", "limit": "0.30"}

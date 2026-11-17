@@ -27,6 +27,7 @@ def test_app_systems_match_the_file_field_for_field():
             raw["sampling_interval_s"],
             raw["gap_missed_intervals"],
         )
+        assert [h.value for h in ours.harm_fields] == raw.get("harm_fields", [])
         assert [
             (t.metric_name, t.metric_type.value, t.direction.value, t.limit_value)
             for t in ours.thresholds
@@ -120,6 +121,7 @@ class TestLoading:
                 ],
             },
             {k: v for k, v in RAW.items() if k != "systems"},
+            {**RAW, "systems": [{**RAW["systems"][0], "harm_fields": ["reputation"]}]},
         ):
             with pytest.raises(FixtureError):
                 parse_fixtures(broken)
@@ -143,3 +145,9 @@ class TestLoading:
         monkeypatch.setenv("CONTRACT_FIXTURES", str(path))
         assert load_fixtures().scenarios == {}
         assert re.fullmatch(r"[0-9a-f-]{36}", load_fixtures().systems["loan-scorer"]["id"])
+
+
+def test_ex1_system_prefills_fundamental_rights_only():
+    """Model 5 Ex-1 expects fundamental_rights prefilled and the other three blank (D-20)."""
+    system = next(s for s in RAW["systems"] if s["name"] == FX.scenarios["Ex-1"].system)
+    assert system["harm_fields"] == ["fundamental_rights"]

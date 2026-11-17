@@ -163,6 +163,9 @@ deployment provides.
   | loan-scorer | same | | | `drift_score` | drift | `> 0.30` |
   | resume-ranker | `550e8400-e29b-41d4-a716-446655440001` | 300 s | 3 intervals | `psi` | drift | `> 0.30` |
 
+  loan-scorer also lists `"harm_fields": ["fundamental_rights"]`: the Art. 3(49) fields its breaches
+  prefill (B-07, **Proposed**, D-20). The field is optional; a system without it prefills none.
+
   A test checks that this table matches the file. Reset also removes all events, samples, webhooks, notifications, dispositions, reports and
   ledger entries, and sets the simulated clock back to real time. API keys stay valid.
 - **B-21 Settle time (Proposed).** Asynchronous effects (gap events, webhook deliveries,

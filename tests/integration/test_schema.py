@@ -282,6 +282,31 @@ class TestRestrictForeignKeys:
         assert violates(conn, "DELETE FROM monitored_system WHERE id = :id", {"id": SYS})
 
 
+class TestSystemHarmFields:
+    """D-20 (migration 0004): a system lists only known Art. 3(49) fields; default none."""
+
+    def test_default_is_empty(self, conn):
+        fields = conn.execute(
+            text("SELECT harm_fields FROM monitored_system WHERE id = :id"), {"id": SYS}
+        ).scalar()
+        assert fields == []
+
+    def test_known_fields_accepted(self, conn):
+        assert not violates(
+            conn,
+            "UPDATE monitored_system SET harm_fields = "
+            "ARRAY['fundamental_rights', 'health_safety'] WHERE id = :id",
+            {"id": SYS},
+        )
+
+    def test_unknown_field_rejected(self, conn):
+        assert violates(
+            conn,
+            "UPDATE monitored_system SET harm_fields = ARRAY['reputation'] WHERE id = :id",
+            {"id": SYS},
+        )
+
+
 def test_timestamps_round_trip_as_utc(conn):
     value = conn.execute(
         text("SELECT sampled_at FROM metric_sample WHERE system_id = :s"), {"s": SYS}

@@ -1,8 +1,10 @@
 """Monitored-system configuration (used by the admin CLI until D-07 adds an endpoint)."""
 
+from collections.abc import Iterable
 from uuid import UUID, uuid4
 
 from app.db.uow import UnitOfWork
+from app.modules.review.models import HarmFieldName
 from app.modules.systems.models import (
     DEFAULT_GAP_MISSED_INTERVALS,
     DEFAULT_SAMPLING_INTERVAL_S,
@@ -21,6 +23,7 @@ def create_system(
     sampling_interval_s: int = DEFAULT_SAMPLING_INTERVAL_S,
     gap_missed_intervals: int = DEFAULT_GAP_MISSED_INTERVALS,
     system_id: UUID | None = None,
+    harm_fields: Iterable[HarmFieldName] = (),
 ) -> MonitoredSystem:
     if sampling_interval_s <= 0 or gap_missed_intervals <= 0:
         raise SystemConfigError("sampling interval and gap intervals must be positive")
@@ -29,9 +32,16 @@ def create_system(
         name=name,
         sampling_interval_s=sampling_interval_s,
         gap_missed_intervals=gap_missed_intervals,
+        harm_fields=harm_field_values(harm_fields),
     )
     with uow:
         if uow.systems.get(system.id) is not None:
             raise SystemConfigError(f"system {system.id} already exists")
         uow.systems.add(system)
     return system
+
+
+def harm_field_values(fields: Iterable[HarmFieldName]) -> list[str]:
+    """Stored form of a system's harm fields: distinct, in HarmFieldName order (D-20)."""
+    chosen = set(fields)
+    return [h.value for h in HarmFieldName if h in chosen]
