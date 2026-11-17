@@ -318,7 +318,7 @@ class TestHarmFieldConstraints:
         assert insert_event(conn, id=event_id)
         return event_id
 
-    def harm(self, conn, event_id, **values) -> bool:
+    def harm(self, conn, event_id=None, **values) -> bool:
         row = {"event_id": event_id, "name": "fundamental_rights", **values}
         cols = ", ".join(row)
         params = ", ".join(f":{k}" for k in row)
@@ -346,7 +346,7 @@ class TestHarmFieldConstraints:
         ],
     )
     def test_invalid_rows_rejected(self, conn, event_id, values):
-        assert not self.harm(conn, event_id, **values)
+        assert not self.harm(conn, **{"event_id": event_id, **values})
 
     def test_confirmed_row_accepted(self, conn, event_id):
         assert self.harm(conn, event_id, status="NOT_APPLICABLE", confirmed_at=T0)
