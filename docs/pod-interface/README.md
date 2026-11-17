@@ -214,7 +214,7 @@ Each team adds its deployment to the pod registry with:
 | D-14 | Common ledger hash rule (B-06) | Independent re-verification (Q4.3) |
 | D-16 | Standard fixtures and scenarios file (B-20, B-24) | Every test's inputs |
 | new | `/v1/meta`, `/v1/me`, `GET /v1/test/clock`, report submission, 30 s settle time (B-21) | Discovery, AC-15 identity, timing |
-| D-03 | Whether `REPORT_READY`/`SUBMITTED` are visible states | Phase 5 assertions |
+| D-03 | `REPORT_READY`/`SUBMITTED` are not event states; the event stays `DISPOSITIONED` and the report carries `assembled_at`/`submitted_at` | Phase 5 assertions |
 
 ## Changes from Phase 2 Section 5
 

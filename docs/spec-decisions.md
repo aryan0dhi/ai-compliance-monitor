@@ -9,7 +9,7 @@ final, because cross-team tests depend on them.
 |----|-------|--------|
 | D-01 | Threshold direction (above/below) | Decided (team); **pod** to confirm for shared fixtures |
 | D-02 | `metric_type` column and `metric_name` naming | Decided (team); no API impact |
-| D-03 | Event type/state names: Section 5 vs Models 1–2 | Interim, **pod** |
+| D-03 | Event type/state names: Section 5 vs Models 1–2 | Decided (team, 2026-11-17): Section 5 names; **pod** to confirm |
 | D-04 | Duplicate metric submissions | Open, **pod**; temporary behavior |
 | D-05 | Evidence bundle window (±1 h) vs flag-time hashing | Open, **pod** |
 | D-06 | API details Section 5 leaves unspecified (Phase 3 endpoints) | Interim, **pod** |
@@ -18,7 +18,7 @@ final, because cross-team tests depend on them.
 | D-09 | Repeated breaches: one event per breaching sample vs one per episode | Open, **pod** |
 | D-10 | Timestamp plausibility (future/very old samples) | Open, **pod** |
 | D-11 | Gap boundary: "longer than" 3 intervals vs Ex-3 detecting at exactly 3 | Decided (team, follows Ex-3); **pod** to confirm |
-| D-12 | Monitoring-gap event states | Interim, **pod** (part of D-03) |
+| D-12 | Monitoring-gap event states | Decided (team, 2026-11-17, with D-03); **pod** to confirm |
 | D-13 | Roles for endpoints Section 5 doesn't assign (webhooks, test routes) | Interim, **pod** |
 | D-14 | Ledger hash algorithm, and which reads are logged | Decided (team); **pod** to confirm for re-verification |
 | D-15 | Webhook delivery semantics (fan-out, retries, signature, SSRF rules) | Interim, **pod** |
@@ -41,7 +41,8 @@ Ordered by impact on cross-team testing:
    `/v1/test/reset`. Proposed: `docs/pod-interface/fixtures.json`, with the Model 5 scenarios
    (D-16).
 5. **D-01**: shared fixtures must say whether each threshold is `above` or `below`.
-6. **D-03**: state names before Phase 4 (`DISPOSITIONED` vs `CLASSIFIED`, etc.).
+6. **D-03** (with D-12): confirm the team decision of 2026-11-17 (Section 5 names, report states
+   internal, gap states unchanged).
 7. **D-08**: whether listing events writes ledger entries.
 8. **D-05** and **D-10**: needed before Phase 5 retention and evidence hashing.
 9. **D-11** to **D-16**: added with gap detection, notifications, auth, the ledger and the test
@@ -86,13 +87,20 @@ the API. The primary key becomes `(system_id, metric_name, sampled_at)`.
 | Gap states | (none; gaps use the same `state` field) | `GAP_OPEN` → `REVIEWER_NOTIFIED` → `GAP_CLOSED` |
 | Disposition tier | `CRITICAL_INFRASTRUCTURE_OR_WIDESPREAD` | `CRIT_INFRA` |
 
-**Interim decision.** The database and API use the Section 5 names, because the cross-team harness
-checks those values. Phase 3 creates `FLAGGED` breach events; gap events use their own states (D-12). Nothing past `FLAGGED` is implemented for breaches yet.
+**Decision (team, 2026-11-17; pod to confirm).** The database and API keep the Section 5 names,
+because the cross-team harness checks those values. No migration is needed.
 
-**To agree with the pod before Phase 4.**
-- Whether `REPORT_READY` and `SUBMITTED` become API-visible states or remain internal.
-- Which `state` values a `monitoring_gap` event reports (INV-12 says a gap never enters review).
-- The canonical spelling of the critical-infrastructure tier.
+- Breach events: `FLAGGED` → `UNDER_REVIEW` → `DISPOSITIONED` (serious tier) or `CLOSED` (not
+  serious). Model 1's `CLASSIFIED(tier)` is `DISPOSITIONED` plus the event's tier;
+  `CLOSED_NOT_SERIOUS` is `CLOSED`.
+- `REPORT_READY` and `SUBMITTED` stay internal: the event remains `DISPOSITIONED`, and the report
+  carries `assembled_at` and `submitted_at` instead (B-12, `POST .../report/submission`).
+- Event types: `threshold_breach` and `monitoring_gap` (Model 2's `BREACH` / `GAP`).
+- Monitoring-gap events keep their own states (D-12) and never take a breach state (INV-12).
+- The critical-infrastructure tier is spelled `CRITICAL_INFRASTRUCTURE_OR_WIDESPREAD`.
+
+`tests/test_pod_interface.py` checks that `EventState` and `EventType` match the pod OpenAPI
+enums, so any later change has to update both.
 
 ## D-04: Duplicate metric submissions (REQ-01, Section 5.1)
 
@@ -242,7 +250,7 @@ can't be in a gap.
 **Gap.** Section 5 lists only breach states. Model 1 gives gaps their own path:
 `GAP_OPEN` → `REVIEWER_NOTIFIED` → `GAP_CLOSED`.
 
-**Interim decision.** Gap events use Model 1's gap states. The database pairs states with types
+**Decision (team, 2026-11-17, with D-03; pod to confirm).** Gap events use Model 1's gap states. The database pairs states with types
 (`ck_event_state_matches_type`), so a gap can never be `UNDER_REVIEW` or receive a disposition
 (INV-12). `REVIEWER_NOTIFIED` is set when a webhook first accepts the gap notification.
 `GAP_CLOSED` is set when a new sample arrives, with `gap_ended_at` = that sample's arrival time

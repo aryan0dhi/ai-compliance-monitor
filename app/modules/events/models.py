@@ -36,7 +36,7 @@ class EventType(StrEnum):
 
 
 class EventState(StrEnum):
-    """Section 5.2 Event.state. Model 1 uses different names (D-03); interim until pod agrees.
+    """Section 5.2 Event.state. Model 1 uses different names; Section 5's are kept (D-03).
 
     Breach events use the Section 5 states. Section 5 has none for monitoring gaps, so gap events
     use Model 1's separate gap path (D-12), which can never reach review or disposition (INV-12).

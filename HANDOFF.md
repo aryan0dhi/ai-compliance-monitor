@@ -322,7 +322,7 @@ Current behavior is implemented and tested; the "If changed" column is the follo
 | D-04 | Status codes for repeated samples | `TEMPORARY(D-04)`: `200` identical, `409` conflicting | Change `_resolve_duplicate` and the router mapping; search `TEMPORARY(D-04)` |
 | D-07 | Configuration API and the shared fixture format | `add_threshold_version()` service only; systems seeded as rows | Add admin endpoints and/or a shared fixture loader |
 | D-01 | Shared fixtures must give each threshold a direction | `above`/`below`, strict | Confirm only; no code change expected |
-| D-03 | Event state/type names (Section 5 vs Models 1–2) | Section 5 names | Migration altering `ck_event_state`/`ck_event_type` + enums (before Phase 4) |
+| D-03 | Event state/type names (Section 5 vs Models 1–2) | Section 5 names (decided by the team 2026-11-17; pod to confirm) | Only if the pod overrules: migration altering `ck_event_state`/`ck_event_type` + enums |
 | D-08 | Whether listing events writes ledger entries | Only `GET /v1/events/{id}` logs a `VIEW` | Pass the ledger to `list_events` (with the ledger owner) |
 | D-05 | Evidence-bundle window and when to hash it | `evidence_bundle_hash` NULL, not computed | Compute the hash (flag time or worker); Phase 5 retention depends on it |
 | D-10 | Limits on future or very old timestamps | Any valid ISO-8601 accepted | Add a window check in `metrics/schemas.py` using the clock |

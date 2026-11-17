@@ -27,6 +27,7 @@ from app.core.config import AppEnv, Settings
 from app.db.uow import get_uow
 from app.main import create_app
 from app.modules.auth.interface import Role, get_principal
+from app.modules.events.models import EventState, EventType
 from app.modules.ledger.interface import get_ledger
 from app.modules.notifications.interface import get_notifier
 from app.modules.notifications.router import get_webhook_sender
@@ -80,6 +81,14 @@ def test_every_documented_error_has_the_error_body():
     for method, path, code, response in errors:
         schema = response["content"]["application/json"]["schema"]
         assert schema == {"$ref": "#/components/schemas/Error"}, (method, path, code)
+
+
+def test_event_enums_match_the_pod_interface():
+    """D-03/D-12: stored state and type names are exactly the contract's (no Model 1 names)."""
+    schemas = SPEC["components"]["schemas"]
+    assert [s.value for s in EventState] == schemas["EventState"]["enum"]
+    assert [t.value for t in EventType] == schemas["EventType"]["enum"]
+    assert "CRITICAL_INFRASTRUCTURE_OR_WIDESPREAD" in schemas["DispositionTier"]["enum"]
 
 
 def test_every_phase3_operation_is_implemented():
