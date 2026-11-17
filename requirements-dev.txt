@@ -411,9 +411,9 @@ fastapi==0.146.0 \
     --hash=sha256:0eb9985a7d5bb11ce9a962d4b65e0cf1a2e13d6aca2e14da57bc526370e26748 \
     --hash=sha256:e96047fc353ff43f7fda069c3578a7d94902a762d9aca2e065f7f801abd91a49
     # via ai-compliance-monitor (pyproject.toml)
-filelock==4.2.2 \
-    --hash=sha256:1851d2f14ca2901e98069d68333b33ad7409f56904e17b48cc0c32a0db8ed73a \
-    --hash=sha256:b29ff2ae9140bb17b3bc77c648dc4f010d9ac0955eccabff4f2b01dde859f787
+filelock==4.2.10 \
+    --hash=sha256:9479aaeb4db20b5a53e3da28493edd24720b66b8a0b84030aa56ccdf243d6857 \
+    --hash=sha256:fcc3c0cb8bfe7f4b3bb0e231c04b15dbad068cb3c2515f343d8fde4dce93bd5d
     # via cachecontrol
 graphql-core==3.2.13 \
     --hash=sha256:b0eb04f2c31556b2310a77c8fb53c74e8b56570f8fea594d89c6ef7827dbb497 \
