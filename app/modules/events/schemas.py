@@ -6,7 +6,8 @@ from pydantic import BaseModel
 
 from app.core.types import IdOut, JsonDecimal, UtcDatetime
 from app.modules.events.models import Event, EventState, EventType
-from app.modules.events.service import EventPage
+from app.modules.events.service import EventPage, EventRecord
+from app.modules.review.models import HarmField, HarmFieldStatus
 
 
 class EventSummary(BaseModel):
@@ -47,12 +48,30 @@ class EventPageOut(BaseModel):
         )
 
 
+class HarmFieldOut(BaseModel):
+    """One Art. 3(49) field (pod interface HarmField, B-07)."""
+
+    status: HarmFieldStatus
+    prefill_evidence: str | None
+    confirmed_by: IdOut | None
+    confirmed_at: UtcDatetime | None
+
+    @classmethod
+    def from_field(cls, f: HarmField) -> "HarmFieldOut":
+        return cls(
+            status=HarmFieldStatus(f.status),
+            prefill_evidence=f.prefill_evidence,
+            confirmed_by=f.confirmed_by,
+            confirmed_at=f.confirmed_at,
+        )
+
+
 class EventDetail(BaseModel):
     """Complete Event object.
 
-    deadline_utc, harm_fields and revision_history are part of the Section 5.2 Event but are
-    produced by Phase 4 review/disposition (REQ-07, REQ-09, REQ-10). Until then they are always
-    null / empty.
+    harm_fields (REQ-07) holds all four Art. 3(49) fields for breach events, and is null for
+    monitoring gaps (INV-12). deadline_utc and revision_history come with disposition (REQ-09,
+    REQ-10) and are null / empty until then.
     """
 
     event_id: IdOut
@@ -61,7 +80,7 @@ class EventDetail(BaseModel):
     state: EventState
     detected_at: UtcDatetime
     deadline_utc: UtcDatetime | None = None
-    harm_fields: dict[str, Any] | None = None
+    harm_fields: dict[str, HarmFieldOut] | None = None
     revision_history: list[dict[str, Any]] = []
     # REQ-03 breach record (null for monitoring_gap events).
     metric_name: str | None
@@ -77,6 +96,13 @@ class EventDetail(BaseModel):
     gap_started_at: UtcDatetime | None = None
     gap_ended_at: UtcDatetime | None = None
     gap_duration_seconds: int | None = None
+
+    @classmethod
+    def from_record(cls, record: EventRecord) -> "EventDetail":
+        detail = cls.from_event(record.event)
+        if record.harm_fields:
+            detail.harm_fields = {f.name: HarmFieldOut.from_field(f) for f in record.harm_fields}
+        return detail
 
     @classmethod
     def from_event(cls, e: Event) -> "EventDetail":

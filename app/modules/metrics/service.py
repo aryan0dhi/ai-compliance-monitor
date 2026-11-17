@@ -17,6 +17,7 @@ from app.modules.events.service import create_breach_event
 from app.modules.ledger.interface import LedgerWriter
 from app.modules.metrics.models import MetricSample, MetricType
 from app.modules.notifications.interface import Notifier
+from app.modules.review.service import open_harm_fields
 from app.modules.thresholds.service import is_breach, threshold_in_force
 
 
@@ -83,8 +84,8 @@ def ingest_metric(
     """Store a metric sample and flag an event if it breaches the threshold in force.
 
     Everything happens in one transaction: the sample, the system's last_seen_at, and (on a
-    breach) the event, its ledger entry and its notification. If any step fails, nothing is
-    stored.
+    breach) the event, its four harm fields (REQ-07), its ledger entry and its notification. If
+    any step fails, nothing is stored.
     """
     authorize_submission(principal, str(submission.system_id))
 
@@ -127,6 +128,7 @@ def ingest_metric(
                 ledger=ledger,
                 notifier=notifier,
             )
+            open_harm_fields(uow, event=event, system=system, threshold=threshold)
             flagged_event_id = event.id
 
     return IngestResult(sample=sample, flagged_event_id=flagged_event_id, created=True)

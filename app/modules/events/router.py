@@ -81,9 +81,9 @@ def get_event_route(
     if parsed_id is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "event not found")
     try:
-        event = get_event(parsed_id, principal=principal, uow=uow, ledger=ledger)
+        record = get_event(parsed_id, principal=principal, uow=uow, ledger=ledger)
     except EventAccessDenied as exc:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
     except EventNotFound as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "event not found") from exc
-    return EventDetail.from_event(event)
+    return EventDetail.from_record(record)
