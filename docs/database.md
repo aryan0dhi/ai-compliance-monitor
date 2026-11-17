@@ -10,6 +10,7 @@ to [spec-decisions.md](spec-decisions.md).
 | `0002` | `monitored_system`, `metric_sample`, `threshold_version`, `event` | REQ-01, REQ-03, REQ-05 (storage only) |
 | `0003` | `app_user`, `api_key`, `ledger_entry`, `webhook`, `notification`, `notification_delivery`, `simulated_clock`, `worker_heartbeat`; gap columns/states on `event`; `gap_missed_intervals` on `monitored_system` | REQ-02, REQ-04, REQ-06, REQ-13, REQ-14 |
 | `0004` | `harm_fields` on `monitored_system` | REQ-07 (D-20) |
+| `0005` | `harm_field` | REQ-07 (B-07) |
 
 ## Diagram
 
@@ -131,6 +132,20 @@ Flagged threshold breaches and monitoring gaps. Type and state names follow the 
   (D-05).
 - Indexes support `GET /v1/events`: `(detected_at, id)` for the default newest-first ordering, plus
   `(system_id, detected_at)`, `state` and `type` for the filters.
+
+### `harm_field` (module `review`, REQ-07)
+The four Art. 3(49) fields of each breach event (B-07). Primary key `(event_id, name)`.
+- Created in the flagging transaction, all four `PENDING`. `prefill_evidence` holds the breach's own
+  facts for the fields the system lists in `monitored_system.harm_fields` (D-20), and is null for the
+  rest. It is never changed afterwards.
+- `status` moves to `CONFIRMED` or `NOT_APPLICABLE` when a reviewer confirms the field (REQ-08a, #38),
+  with `confirmed_by`, `confirmed_at` and the reviewer's own `evidence`.
+  `ck_harm_field_confirmed_at_matches_status` and `ck_harm_field_pending_has_no_reviewer` keep the
+  confirmation columns consistent with `status`.
+- Monitoring-gap events have no rows (INV-12). Breach events flagged before migration 0005 have none
+  either; the API shows their `harm_fields` as null.
+- `event_id` and `confirmed_by` are `RESTRICT` foreign keys, so an event with harm fields can't be
+  deleted.
 
 ### `app_user`, `api_key` (module `auth`, REQ-13)
 - `app_user.id` is the `actor_id` written to the ledger. `role` is `system | viewer | reviewer |
