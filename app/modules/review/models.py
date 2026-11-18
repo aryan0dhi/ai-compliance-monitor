@@ -1,4 +1,5 @@
-"""Review: the Art. 3(49) harm fields of flagged events (REQ-07, B-07).
+"""Review: the Art. 3(49) harm fields of flagged events (REQ-07, B-07) and their dispositions
+(REQ-08a/b, REQ-09, B-08, B-09).
 
 HarmFieldName is also used by monitored_system.harm_fields (D-20).
 """
@@ -68,3 +69,50 @@ class HarmField(Base):
         ForeignKey("app_user.id", ondelete="RESTRICT")
     )
     confirmed_at: Mapped[datetime | None]
+
+
+class DispositionTier(StrEnum):
+    """Article 73 tiers (pod interface DispositionTier). NOT_SERIOUS closes the event (REQ-08b)."""
+
+    DEATH = "DEATH"
+    CRITICAL_INFRASTRUCTURE_OR_WIDESPREAD = "CRITICAL_INFRASTRUCTURE_OR_WIDESPREAD"
+    OTHER_SERIOUS = "OTHER_SERIOUS"
+    NOT_SERIOUS = "NOT_SERIOUS"
+
+    @property
+    def is_serious(self) -> bool:
+        return self is not DispositionTier.NOT_SERIOUS
+
+
+class Disposition(Base):
+    """One tier assignment by a reviewer (REQ-08a/b). Insert-only: a revision is a new row (B-09).
+
+    Primary key `(event_id, seq)`: `seq` numbers an event's dispositions from 1, and the latest
+    row is the event's current tier. Every row after the first records the tier it replaced in
+    `previous_tier`.
+    """
+
+    __tablename__ = "disposition"
+    __table_args__ = (
+        check_in("tier", DispositionTier, name="tier"),
+        check_in("previous_tier", DispositionTier, name="previous_tier"),
+        CheckConstraint("seq > 0", name="seq_positive"),
+        # B-09: the first disposition replaces nothing; every revision names what it replaced.
+        CheckConstraint("(seq = 1) = (previous_tier IS NULL)", name="previous_tier_matches_seq"),
+        # B-08 / REQ-08b: a not-serious determination always carries its reason.
+        CheckConstraint(
+            f"tier <> '{DispositionTier.NOT_SERIOUS}' OR btrim(coalesce(rationale, '')) <> ''",
+            name="not_serious_has_rationale",
+        ),
+    )
+
+    event_id: Mapped[UUID] = mapped_column(
+        ForeignKey("event.id", ondelete="RESTRICT"), primary_key=True
+    )
+    seq: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    tier: Mapped[str]
+    previous_tier: Mapped[str | None]
+    reviewer_id: Mapped[UUID] = mapped_column(ForeignKey("app_user.id", ondelete="RESTRICT"))
+    rationale: Mapped[str | None]
+    # core.clock time of the determination.
+    recorded_at: Mapped[datetime]

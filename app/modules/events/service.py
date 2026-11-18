@@ -1,10 +1,10 @@
 """Event creation (REQ-03) and retrieval (GET /v1/events, GET /v1/events/{id}).
 
-Review, disposition and deadline logic (Phase 4) belong in their own modules and reference
+Review, disposition and deadline logic (Phase 4) live in app.modules.review and reference
 events by id.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
@@ -16,7 +16,7 @@ from app.modules.events.repository import EventFilters
 from app.modules.ledger.interface import LedgerEntryType, LedgerWriter
 from app.modules.metrics.models import MetricSample
 from app.modules.notifications.interface import NotificationType, Notifier
-from app.modules.review.models import HarmField
+from app.modules.review.models import Disposition, HarmField
 from app.modules.thresholds.models import ThresholdVersion
 
 # Roles allowed to read events. Monitored-system keys only submit metrics (Section 5.1).
@@ -41,11 +41,14 @@ class EventPage:
 
 @dataclass(frozen=True)
 class EventRecord:
-    """One event as GET /v1/events/{id} returns it: the row plus its harm fields (B-07)."""
+    """One event as GET /v1/events/{id} returns it: the row, its harm fields (B-07) and its
+    dispositions (B-09)."""
 
     event: Event
     # Art. 3(49) order; empty for monitoring gaps (INV-12) and breaches flagged before Phase 4.
     harm_fields: list[HarmField]
+    # Oldest first; empty until a reviewer assigns a tier.
+    dispositions: list[Disposition] = field(default_factory=list)
 
 
 def event_payload(event: Event) -> dict[str, Any]:
@@ -162,4 +165,5 @@ def get_event(
             event_id=event.id,
         )
         harm_fields = uow.harm_fields.for_event(event.id)
-    return EventRecord(event=event, harm_fields=harm_fields)
+        dispositions = uow.dispositions.for_event(event.id)
+    return EventRecord(event=event, harm_fields=harm_fields, dispositions=dispositions)

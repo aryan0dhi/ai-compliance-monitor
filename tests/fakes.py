@@ -34,7 +34,7 @@ from app.modules.notifications.models import (
     Webhook,
 )
 from app.modules.notifications.outbox import build_notification
-from app.modules.review.models import HarmField, HarmFieldName
+from app.modules.review.models import Disposition, HarmField, HarmFieldName
 from app.modules.systems.models import MonitoredSystem
 from app.modules.thresholds.models import ThresholdVersion
 
@@ -167,6 +167,20 @@ class FakeHarmFieldRepository:
         return sorted(found, key=lambda f: order.index(f.name))
 
 
+class FakeDispositionRepository:
+    def __init__(self) -> None:
+        self.rows: dict[tuple[UUID, int], Disposition] = {}
+
+    def add(self, disposition: Disposition) -> None:
+        key = (disposition.event_id, disposition.seq)
+        if key in self.rows:
+            raise ValueError(f"duplicate disposition {key}")  # the primary key in SQL
+        self.rows[key] = disposition
+
+    def for_event(self, event_id: UUID) -> list[Disposition]:
+        return sorted((d for (e, _), d in self.rows.items() if e == event_id), key=lambda d: d.seq)
+
+
 class FakeAuthRepository:
     def __init__(self) -> None:
         self.users: dict[UUID, AppUser] = {}
@@ -277,6 +291,7 @@ class FakeUnitOfWork:
         self.thresholds = FakeThresholdRepository()
         self.events = FakeEventRepository()
         self.harm_fields = FakeHarmFieldRepository()
+        self.dispositions = FakeDispositionRepository()
         self.auth = FakeAuthRepository()
         self.ledger = FakeLedgerRepository()
         self.webhooks = FakeWebhookRepository()
@@ -291,6 +306,7 @@ class FakeUnitOfWork:
             self.thresholds,
             self.events,
             self.harm_fields,
+            self.dispositions,
             self.auth,
             self.ledger,
             self.webhooks,

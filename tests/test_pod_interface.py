@@ -4,7 +4,7 @@
 - Every Phase 3 operation it defines exists here.
 - Schemathesis generates requests from the POD document (not our own OpenAPI) and validates our
   responses against it, so any drift between this implementation and the agreed interface fails.
-  Phase 4/5 operations aren't implemented yet; /v1/test/reset needs PostgreSQL (covered by
+  Phase 5 operations aren't implemented yet; /v1/test/reset needs PostgreSQL (covered by
   tests/integration and the live contract suite).
 """
 
@@ -144,6 +144,8 @@ def _app():
             return system_principal(SYSTEM_ID)
         if path == "/v1/webhooks" or path.startswith("/v1/test/"):
             return user_principal(Role.ADMIN)
+        if path.endswith("/disposition"):
+            return user_principal(Role.REVIEWER)
         return user_principal(Role.VIEWER)
 
     clock = FakeSimulatedClock()
@@ -163,7 +165,7 @@ def _app():
 
 _loaded = schemathesis.openapi.from_dict(SPEC)
 _loaded.app = _app()
-pod_schema = _loaded.exclude(path_regex="/disposition$|/report|^/v1/test/reset$")
+pod_schema = _loaded.exclude(path_regex="/report|^/v1/test/reset$")
 
 
 @pod_schema.auth()
@@ -190,6 +192,14 @@ def test_conforms_to_pod_interface(case):
             datetime.fromisoformat(case.body["timestamp"]).astimezone(UTC)
         except (ValueError, OverflowError):
             reject()
+    # D-22: a whitespace-only NOT_SERIOUS rationale is "empty" (400), though minLength allows it.
+    if (
+        isinstance(case.body, dict)
+        and case.body.get("tier") == "NOT_SERIOUS"
+        and isinstance(case.body.get("rationale"), str)
+        and not case.body["rationale"].strip()
+    ):
+        reject()
     case.call_and_validate()
 
 

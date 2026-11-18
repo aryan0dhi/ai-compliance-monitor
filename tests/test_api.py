@@ -311,7 +311,7 @@ class TestGetEvents:
             "fundamental_rights": pending,
             "property_environment": pending,
         }
-        # Disposition fields (#38/#39): not yet populated.
+        # No disposition yet (#38); deadlines come with #39.
         assert body["deadline_utc"] is None
         assert body["revision_history"] == []
         assert ledger.calls[-1]["entry_type"] == "VIEW"

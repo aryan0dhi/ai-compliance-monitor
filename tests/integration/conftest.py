@@ -30,6 +30,7 @@ TABLES = [
     "notification",
     "webhook",
     "ledger_entry",
+    "disposition",
     "harm_field",
     "event",
     "threshold_version",

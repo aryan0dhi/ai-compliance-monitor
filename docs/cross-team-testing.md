@@ -115,6 +115,7 @@ key, and tell them which fixture their system/metrics correspond to.
 export CONTRACT_BASE_URL=https://their-service.example.com
 export CONTRACT_SYSTEM_KEY=... CONTRACT_VIEWER_KEY=... CONTRACT_ADMIN_KEY=...
 export CONTRACT_RESUME_RANKER_KEY=...   # system key for resume-ranker (Model 5 Ex-2)
+export CONTRACT_REVIEWER_KEY=...        # reviewer key, for Phase 4 scenario steps (disposition)
 # Only if their fixtures differ from ours: point at their fixtures file, or override single values
 # (defaults come from docs/pod-interface/fixtures.json):
 export CONTRACT_FIXTURES=their-fixtures.json
@@ -189,7 +190,7 @@ returns `500` with `tester`, and the results so far are stored: the interrupted 
 error body is `{message, source}`.
 
 **Keys for the target.** The tester's own `CONTRACT_SYSTEM_KEY`, `CONTRACT_VIEWER_KEY`,
-`CONTRACT_ADMIN_KEY` and `CONTRACT_RESUME_RANKER_KEY` (and the other `CONTRACT_*` settings from section 2) apply to every target.
+`CONTRACT_ADMIN_KEY`, `CONTRACT_RESUME_RANKER_KEY` and `CONTRACT_REVIEWER_KEY` (and the other `CONTRACT_*` settings from section 2) apply to every target.
 Per-target values go in a JSON file named by `TESTER_TARGETS_FILE`:
 `{"https://their-system.example": {"CONTRACT_SYSTEM_KEY": "...", "CONTRACT_SYSTEM_ID": "..."}}`.
 Keys are never part of a URL or the registry.

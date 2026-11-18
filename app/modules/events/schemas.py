@@ -1,13 +1,11 @@
 """GET /v1/events and GET /v1/events/{event_id} response bodies (Phase 2, Section 5.2 Event)."""
 
-from typing import Any
-
 from pydantic import BaseModel
 
 from app.core.types import IdOut, JsonDecimal, UtcDatetime
 from app.modules.events.models import Event, EventState, EventType
 from app.modules.events.service import EventPage, EventRecord
-from app.modules.review.models import HarmField, HarmFieldStatus
+from app.modules.review.models import Disposition, DispositionTier, HarmField, HarmFieldStatus
 
 
 class EventSummary(BaseModel):
@@ -66,12 +64,37 @@ class HarmFieldOut(BaseModel):
         )
 
 
+class RevisionOut(BaseModel):
+    """One disposition in revision_history (pod interface Revision, B-09).
+
+    Every disposition is listed, oldest first; the first has previous_tier null and the last is
+    the event's current tier. deadline_utc stays null until deadlines are implemented (B-10, #39).
+    """
+
+    tier: DispositionTier
+    previous_tier: DispositionTier | None
+    reviewer_id: IdOut
+    recorded_at: UtcDatetime
+    rationale: str | None
+    deadline_utc: UtcDatetime | None = None
+
+    @classmethod
+    def from_disposition(cls, d: Disposition) -> "RevisionOut":
+        return cls(
+            tier=DispositionTier(d.tier),
+            previous_tier=DispositionTier(d.previous_tier) if d.previous_tier else None,
+            reviewer_id=d.reviewer_id,
+            recorded_at=d.recorded_at,
+            rationale=d.rationale,
+        )
+
+
 class EventDetail(BaseModel):
     """Complete Event object.
 
     harm_fields (REQ-07) holds all four Art. 3(49) fields for breach events, and is null for
-    monitoring gaps (INV-12). deadline_utc and revision_history come with disposition (REQ-09,
-    REQ-10) and are null / empty until then.
+    monitoring gaps (INV-12). revision_history lists every disposition (REQ-09, B-09) and is empty
+    until the first. deadline_utc is null until deadlines are implemented (REQ-10, #39).
     """
 
     event_id: IdOut
@@ -81,7 +104,7 @@ class EventDetail(BaseModel):
     detected_at: UtcDatetime
     deadline_utc: UtcDatetime | None = None
     harm_fields: dict[str, HarmFieldOut] | None = None
-    revision_history: list[dict[str, Any]] = []
+    revision_history: list[RevisionOut] = []
     # REQ-03 breach record (null for monitoring_gap events).
     metric_name: str | None
     metric_timestamp: UtcDatetime | None
@@ -102,6 +125,7 @@ class EventDetail(BaseModel):
         detail = cls.from_event(record.event)
         if record.harm_fields:
             detail.harm_fields = {f.name: HarmFieldOut.from_field(f) for f in record.harm_fields}
+        detail.revision_history = [RevisionOut.from_disposition(d) for d in record.dispositions]
         return detail
 
     @classmethod

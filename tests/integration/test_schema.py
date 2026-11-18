@@ -356,6 +356,70 @@ class TestHarmFieldConstraints:
         assert violates(conn, "DELETE FROM event WHERE id = :e", {"e": event_id})
 
 
+class TestDispositionConstraints:
+    """Migration 0006 (B-08, B-09): insert-only tier history, numbered per event."""
+
+    @pytest.fixture
+    def event_id(self, conn):
+        event_id = uuid.uuid4()
+        assert insert_event(conn, id=event_id)
+        return event_id
+
+    @pytest.fixture
+    def reviewer(self, conn):
+        return insert_user(conn, role="reviewer")
+
+    def dispose(self, conn, event_id, reviewer, **values) -> bool:
+        row = {
+            "event_id": event_id,
+            "seq": 1,
+            "tier": "OTHER_SERIOUS",
+            "previous_tier": None,
+            "reviewer_id": reviewer,
+            "rationale": None,
+            "recorded_at": T0,
+            **values,
+        }
+        cols = ", ".join(row)
+        params = ", ".join(f":{k}" for k in row)
+        return not violates(conn, f"INSERT INTO disposition ({cols}) VALUES ({params})", row)
+
+    def test_first_and_revision_accepted(self, conn, event_id, reviewer):
+        assert self.dispose(conn, event_id, reviewer)
+        assert self.dispose(
+            conn, event_id, reviewer, seq=2, tier="DEATH", previous_tier="OTHER_SERIOUS"
+        )
+
+    def test_one_row_per_event_and_seq(self, conn, event_id, reviewer):
+        assert self.dispose(conn, event_id, reviewer)
+        assert not self.dispose(conn, event_id, reviewer, tier="DEATH")
+
+    @pytest.mark.parametrize(
+        "values",
+        [
+            {"tier": "CRIT_INFRA"},
+            {"seq": 0},
+            {"previous_tier": "DEATH"},  # the first replaces nothing
+            {"seq": 2},  # a revision must name what it replaced
+            {"seq": 2, "previous_tier": "SEVERE"},
+            {"tier": "NOT_SERIOUS"},
+            {"tier": "NOT_SERIOUS", "rationale": "  "},
+            {"reviewer_id": uuid.uuid4()},  # no such user
+            {"event_id": uuid.uuid4()},  # no such event
+            {"recorded_at": None},
+        ],
+    )
+    def test_invalid_rows_rejected(self, conn, event_id, reviewer, values):
+        assert not self.dispose(conn, event_id, reviewer, **values)
+
+    def test_not_serious_with_rationale_accepted(self, conn, event_id, reviewer):
+        assert self.dispose(conn, event_id, reviewer, tier="NOT_SERIOUS", rationale="no harm")
+
+    def test_dispositioned_event_cannot_be_deleted(self, conn, event_id, reviewer):
+        assert self.dispose(conn, event_id, reviewer)
+        assert violates(conn, "DELETE FROM event WHERE id = :e", {"e": event_id})
+
+
 def test_timestamps_round_trip_as_utc(conn):
     value = conn.execute(
         text("SELECT sampled_at FROM metric_sample WHERE system_id = :s"), {"s": SYS}
@@ -473,6 +537,9 @@ class TestLedgerConstraints:
     )
     def test_checks(self, conn, seq, prev, entry_type):
         assert not insert_ledger(conn, seq, prev, entry_type=entry_type)
+
+    def test_disposition_entries_accepted(self, conn):
+        assert insert_ledger(conn, 1, "0" * 64, entry_type="DISPOSITION")
 
     def test_audited_event_cannot_be_deleted(self, conn):
         event_id = uuid.uuid4()

@@ -11,6 +11,7 @@ to [spec-decisions.md](spec-decisions.md).
 | `0003` | `app_user`, `api_key`, `ledger_entry`, `webhook`, `notification`, `notification_delivery`, `simulated_clock`, `worker_heartbeat`; gap columns/states on `event`; `gap_missed_intervals` on `monitored_system` | REQ-02, REQ-04, REQ-06, REQ-13, REQ-14 |
 | `0004` | `harm_fields` on `monitored_system` | REQ-07 (D-20) |
 | `0005` | `harm_field` | REQ-07 (B-07) |
+| `0006` | `disposition`; `DISPOSITION` ledger entry type | REQ-08a/b, REQ-09 (B-08, B-09) |
 
 ## Diagram
 
@@ -21,6 +22,8 @@ erDiagram
     monitored_system ||--o{ event : "has"
     threshold_version ||--o{ event : "breached by"
     metric_sample ||--o| event : "triggers (breach only)"
+    event ||--o{ harm_field : "Art. 3(49) fields (breach only)"
+    event ||--o{ disposition : "tiers, oldest first (breach only)"
 
     monitored_system {
         uuid id PK
@@ -65,6 +68,24 @@ erDiagram
         text evidence_bundle_hash "nullable, D-05"
         timestamptz gap_started_at "gap only"
         timestamptz gap_ended_at "gap only, set when closed"
+    }
+    harm_field {
+        uuid event_id PK,FK
+        text name PK "one of the four Art. 3(49) fields"
+        text status "PENDING | CONFIRMED | NOT_APPLICABLE"
+        text prefill_evidence "nullable, D-20"
+        text evidence "nullable, the reviewer's"
+        uuid confirmed_by FK "nullable"
+        timestamptz confirmed_at "nullable"
+    }
+    disposition {
+        uuid event_id PK,FK
+        int seq PK "1, 2, ..."
+        text tier "DEATH | CRITICAL_INFRASTRUCTURE_OR_WIDESPREAD | OTHER_SERIOUS | NOT_SERIOUS"
+        text previous_tier "null only for seq 1"
+        uuid reviewer_id FK
+        text rationale "required for NOT_SERIOUS"
+        timestamptz recorded_at
     }
 ```
 
@@ -138,14 +159,32 @@ The four Art. 3(49) fields of each breach event (B-07). Primary key `(event_id, 
 - Created in the flagging transaction, all four `PENDING`. `prefill_evidence` holds the breach's own
   facts for the fields the system lists in `monitored_system.harm_fields` (D-20), and is null for the
   rest. It is never changed afterwards.
-- `status` moves to `CONFIRMED` or `NOT_APPLICABLE` when a reviewer confirms the field (REQ-08a, #38),
-  with `confirmed_by`, `confirmed_at` and the reviewer's own `evidence`.
+- `status` moves to `CONFIRMED` or `NOT_APPLICABLE` when a reviewer confirms the field in a
+  disposition call (REQ-08a), with `confirmed_by`, `confirmed_at` and the reviewer's own `evidence`.
+  A later call may confirm a field again; the row then holds the latest confirmation and the
+  ledger keeps every one (D-22).
   `ck_harm_field_confirmed_at_matches_status` and `ck_harm_field_pending_has_no_reviewer` keep the
   confirmation columns consistent with `status`.
 - Monitoring-gap events have no rows (INV-12). Breach events flagged before migration 0005 have none
-  either; the API shows their `harm_fields` as null.
+  either; the API shows their `harm_fields` as null until their first disposition call, which
+  opens the four rows (without prefill) before applying the confirmations.
 - `event_id` and `confirmed_by` are `RESTRICT` foreign keys, so an event with harm fields can't be
   deleted.
+
+### `disposition` (module `review`, REQ-08a/b, REQ-09)
+Every tier a reviewer assigns to a breach event (B-08, B-09). Primary key `(event_id, seq)`.
+- Insert-only: each `POST /v1/events/{id}/disposition` adds a row with the next `seq` (from 1), so
+  a revision never overwrites the earlier tier. The latest row is the event's current tier, and
+  `GET /v1/events/{id}` lists every row as `revision_history`.
+- `previous_tier` is the tier the row replaced: null for the first row and set for every later one
+  (`ck_disposition_previous_tier_matches_seq`).
+- `tier` is one of the four Article 73 tiers; `NOT_SERIOUS` needs a non-blank `rationale`
+  (`ck_disposition_not_serious_has_rationale`).
+- `reviewer_id` references `app_user`; `recorded_at` is the clock time of the call. The event row
+  is locked while a disposition is recorded, so concurrent calls get consecutive numbers.
+- The row, the harm-field confirmations, the event's new state (`DISPOSITIONED`, or `CLOSED` for
+  `NOT_SERIOUS`) and one `DISPOSITION` ledger entry commit in one transaction.
+- Deadlines (B-10) are not stored yet (#39).
 
 ### `app_user`, `api_key` (module `auth`, REQ-13)
 - `app_user.id` is the `actor_id` written to the ledger. `role` is `system | viewer | reviewer |
