@@ -104,6 +104,11 @@ class Disposition(Base):
             f"tier <> '{DispositionTier.NOT_SERIOUS}' OR btrim(coalesce(rationale, '')) <> ''",
             name="not_serious_has_rationale",
         ),
+        # B-10: every serious tier has a deadline; NOT_SERIOUS has none.
+        CheckConstraint(
+            f"(tier = '{DispositionTier.NOT_SERIOUS}') = (deadline_utc IS NULL)",
+            name="deadline_matches_tier",
+        ),
     )
 
     event_id: Mapped[UUID] = mapped_column(
@@ -116,3 +121,6 @@ class Disposition(Base):
     rationale: Mapped[str | None]
     # core.clock time of the determination.
     recorded_at: Mapped[datetime]
+    # The Article 73 deadline in force after this disposition (B-10, review.deadlines). The
+    # latest row's value is the event's deadline_utc.
+    deadline_utc: Mapped[datetime | None]

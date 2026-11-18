@@ -12,6 +12,7 @@ to [spec-decisions.md](spec-decisions.md).
 | `0004` | `harm_fields` on `monitored_system` | REQ-07 (D-20) |
 | `0005` | `harm_field` | REQ-07 (B-07) |
 | `0006` | `disposition`; `DISPOSITION` ledger entry type | REQ-08a/b, REQ-09 (B-08, B-09) |
+| `0007` | `deadline_utc` on `disposition` (backfilled) | REQ-10 (B-10, D-23) |
 
 ## Diagram
 
@@ -86,6 +87,7 @@ erDiagram
         uuid reviewer_id FK
         text rationale "required for NOT_SERIOUS"
         timestamptz recorded_at
+        timestamptz deadline_utc "null only for NOT_SERIOUS"
     }
 ```
 
@@ -184,7 +186,11 @@ Every tier a reviewer assigns to a breach event (B-08, B-09). Primary key `(even
   is locked while a disposition is recorded, so concurrent calls get consecutive numbers.
 - The row, the harm-field confirmations, the event's new state (`DISPOSITIONED`, or `CLOSED` for
   `NOT_SERIOUS`) and one `DISPOSITION` ledger entry commit in one transaction.
-- Deadlines (B-10) are not stored yet (#39).
+- `deadline_utc` is the Article 73 deadline in force after that disposition (B-10, D-23); the
+  latest row's value is the event's `deadline_utc`. `A`, the anchor of every deadline, is the
+  `recorded_at` of the event's first serious-tier row. `ck_disposition_deadline_matches_tier`
+  requires a deadline for every serious tier and none for `NOT_SERIOUS`. Migration 0007
+  backfilled earlier rows by replaying each event's dispositions.
 
 ### `app_user`, `api_key` (module `auth`, REQ-13)
 - `app_user.id` is the `actor_id` written to the ledger. `role` is `system | viewer | reviewer |

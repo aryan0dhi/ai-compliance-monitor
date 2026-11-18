@@ -137,7 +137,9 @@ deployment provides.
   (OTHER_SERIOUS). Days are calendar days (exactly 24 h each) by default. Revising to a stricter
   tier gives `min(current deadline, A + days(new tier))`. Revising to a less strict tier keeps the
   current deadline unless a `rationale` is given (otherwise `409`); with a rationale it becomes
-  `A + days(new tier)`.
+  `A + days(new tier)`. **Proposed** (D-23): stricter = fewer days, `NOT_SERIOUS` least strict;
+  `A` is the first serious assignment; the same tier again keeps the deadline; each
+  `revision_history` entry carries the deadline it set.
 - **B-11 Reminders (REQ-11, AC-12).** For a serious-tier event, each webhook registered for
   `reminder` receives exactly one delivery when service-clock time reaches 50 %, 80 % and 100 % of
   the window from `A` to `deadline_utc`, and none at 49 %, 79 % or 99 %.
@@ -220,6 +222,7 @@ Each team adds its deployment to the pod registry with:
 | D-16 | Standard fixtures and scenarios file (B-20, B-24) | Every test's inputs |
 | new | `/v1/meta`, `/v1/me`, `GET /v1/test/clock`, report submission, 30 s settle time (B-21) | Discovery, AC-15 identity, timing |
 | D-03 | `REPORT_READY`/`SUBMITTED` are not event states; the event stays `DISPOSITIONED` and the report carries `assembled_at`/`submitted_at` | Phase 5 assertions |
+| D-23 | Tier order by days, `A` = first serious assignment, same tier keeps the deadline | Phase 4 deadline assertions |
 | D-22 | Full `revision_history`, blank rationale `400`, confirmations in the disposition body, Ex-2 confirms its fields first | Phase 4 disposition assertions |
 
 ## Changes from Phase 2 Section 5

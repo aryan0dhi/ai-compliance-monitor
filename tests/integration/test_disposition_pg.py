@@ -1,5 +1,5 @@
 """POST /v1/events/{id}/disposition on PostgreSQL with the production auth and ledger
-(REQ-08a/b, REQ-09, REQ-13; B-08, B-09; Model 5 Ex-1 and Ex-2)."""
+(REQ-08a/b, REQ-09, REQ-10, REQ-13; B-08 to B-10; Model 5 Ex-1 and Ex-2)."""
 
 import threading
 import uuid
@@ -105,6 +105,13 @@ def test_model5_ex1_assign_then_revise(stack, clock):
 
     event = stack.call("GET", f"/v1/events/{event_id}", "viewer").json()
     assert event["state"] == "DISPOSITIONED"
+    # B-10: A = d0 13:00 equivalent (T0 + 1 min + 4 h); DEATH is stricter, so A + 10 days.
+    assert first.json()["deadline_utc"] == "2026-10-13T00:01:00Z"
+    assert event["deadline_utc"] == "2026-10-08T00:01:00Z"
+    assert [r["deadline_utc"] for r in event["revision_history"]] == [
+        "2026-10-13T00:01:00Z",
+        "2026-10-08T00:01:00Z",
+    ]
     assert [
         (r["tier"], r["previous_tier"], r["reviewer_id"], r["recorded_at"])
         for r in event["revision_history"]

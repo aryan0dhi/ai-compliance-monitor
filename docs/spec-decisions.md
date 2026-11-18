@@ -28,6 +28,7 @@ final, because cross-team tests depend on them.
 | D-19 | Course testing interface: `/test/setup`, `/test/report` sessions, access, coverage | Interim (team) |
 | D-20 | REQ-07 prefill: which harm fields a breach prefills, and with what evidence | Decided (team, 2026-11-17); **pod** to confirm |
 | D-22 | Disposition details B-08/B-09 leave open (blank rationale, history, re-confirmation, Ex-2) | Interim (team, #38); **pod** to confirm |
+| D-23 | Deadline details B-10 leaves open (which tier is stricter, A after NOT_SERIOUS, same tier) | Interim (team, #39); **pod** to confirm |
 
 ## Agenda for the next pod meeting
 
@@ -431,8 +432,34 @@ Ex-2 disagrees with B-08.
 - **Audit.** One `DISPOSITION` ledger entry per accepted call (B-14), with the tier, previous tier,
   rationale, new state and the confirmations made in that call. Refused calls write nothing yet;
   Ex-4 `viewer-tier` expects the refused attempt in the ledger, which is still open.
-- **Not in #38.** Deadlines and the rule for revising to a less strict tier (B-10, #39);
-  reminders (B-11, #40).
+- **Not in #38.** Deadlines and the rule for revising to a less strict tier (B-10): D-23, #39.
+  Reminders (B-11): #40.
+
+## D-23: Deadline details (REQ-10, REQ-15, B-10, B-15, AC-11, AC-17)
+
+**Gaps.** B-10 gives `deadline_utc = A + days(tier)` and the stricter/looser revision rules but
+doesn't say how tiers are ordered, what happens around `NOT_SERIOUS`, or what a repeat of the same
+tier does. Its looser-revision sentence ("keeps the current deadline unless a rationale is given
+(otherwise `409`)") reads both ways; `DispositionIn` says a rationale is required.
+
+**Interim behavior (#39; pod to confirm):**
+
+- **Order.** Stricter means fewer days: `CRITICAL_INFRASTRUCTURE_OR_WIDESPREAD` (2) before
+  `DEATH` (10) before `OTHER_SERIOUS` (15) before `NOT_SERIOUS` (no deadline).
+- **A** is the time of the first **serious** disposition and never moves. An event first
+  assessed `NOT_SERIOUS` and later revised to a serious tier is anchored at that revision.
+- **Stricter:** `min(current deadline, A + days(new tier))`; with no current deadline (after
+  `NOT_SERIOUS`), `A + days(new tier)`.
+- **Less strict:** needs a non-blank rationale, else `409` and nothing changes; with one the
+  deadline becomes `A + days(new tier)`. Revising to `NOT_SERIOUS` clears it (it always has a
+  rationale, B-08).
+- **Same tier again:** keeps the current deadline.
+- **Storage.** Each disposition stores the deadline it set (`revision_history[].deadline_utc`),
+  so a later rule change never rewrites past deadlines. Days are exactly 24 h on the service
+  clock, so `/v1/test/clock/advance` applies.
+- **B-15.** `detected_at` is set at flagging and nothing in review changes it.
+- **Contract suite.** Phase 4 scenario steps advance the service clock to their `at` offset
+  (test routes needed) and check deadlines against it, allowing 60 s for real time spent.
 
 ## Other notes
 
