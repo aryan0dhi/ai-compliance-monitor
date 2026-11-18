@@ -369,9 +369,9 @@ class TestDispositionConstraints:
     def reviewer(self, conn):
         return insert_user(conn, role="reviewer")
 
-    def dispose(self, conn, event_id, reviewer, **values) -> bool:
+    def dispose(self, conn, event, reviewer, **values) -> bool:
         row = {
-            "event_id": event_id,
+            "event_id": event,
             "seq": 1,
             "tier": "OTHER_SERIOUS",
             "previous_tier": None,

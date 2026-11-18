@@ -2,7 +2,8 @@
 
 from typing import Literal, Self
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic.config import JsonDict
 
 from app.modules.review.disposition import DispositionRequest, FieldConfirmation, has_text
 from app.modules.review.models import DispositionTier, HarmFieldName, HarmFieldStatus
@@ -24,7 +25,24 @@ class HarmFieldConfirmationsIn(BaseModel):
     property_environment: HarmFieldConfirmationIn | None = None
 
 
+# B-08 in the published schema, as the pod document states it (allOf/if/then), so clients and
+# schema-driven tests know NOT_SERIOUS needs a rationale. The pattern adds D-22: not blank.
+NOT_SERIOUS_NEEDS_RATIONALE: JsonDict = {
+    "allOf": [
+        {
+            "if": {"properties": {"tier": {"const": DispositionTier.NOT_SERIOUS.value}}},
+            "then": {
+                "required": ["rationale"],
+                "properties": {"rationale": {"type": "string", "minLength": 1, "pattern": r"\S"}},
+            },
+        }
+    ]
+}
+
+
 class DispositionIn(BaseModel):
+    model_config = ConfigDict(json_schema_extra=NOT_SERIOUS_NEEDS_RATIONALE)
+
     tier: DispositionTier
     rationale: str | None = Field(
         None,

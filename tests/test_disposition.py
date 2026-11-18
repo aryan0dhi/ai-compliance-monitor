@@ -530,3 +530,12 @@ class TestHttp:
         op = create_app().openapi()["paths"]["/v1/events/{event_id}/disposition"]["post"]
         assert op["operationId"] == "recordDisposition"
         assert set(op["responses"]) >= {"200", "400", "401", "403", "404", "409"}
+
+    def test_schema_states_the_rationale_rule(self):
+        """B-08 is in the published schema, so schema-driven clients don't send a bare
+        NOT_SERIOUS (the pod document uses the same allOf/if/then)."""
+        schema = create_app().openapi()["components"]["schemas"]["DispositionIn"]
+        (rule,) = schema["allOf"]
+        assert rule["if"] == {"properties": {"tier": {"const": "NOT_SERIOUS"}}}
+        assert rule["then"]["required"] == ["rationale"]
+        assert rule["then"]["properties"]["rationale"]["pattern"] == r"\S"
