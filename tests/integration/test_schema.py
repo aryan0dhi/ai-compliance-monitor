@@ -615,12 +615,15 @@ class TestNotificationConstraints:
             "t": "flag_notification",
             "c": T0,
             "d": T0 + timedelta(minutes=15),
+            "p": None,
+            "rd": None,
         }
         values.update(overrides)
         ok = not violates(
             conn,
             "INSERT INTO notification (id, event_id, notification_type, payload, created_at,"
-            " deliver_by) VALUES (:id, :e, :t, '{}', :c, :d)",
+            " deliver_by, reminder_percent, reminder_deadline_utc)"
+            " VALUES (:id, :e, :t, '{}', :c, :d, :p, :rd)",
             values,
         )
         return values["id"] if ok else None
@@ -630,6 +633,21 @@ class TestNotificationConstraints:
         assert self.insert_notification(conn, event_id, t="sms") is None
         assert self.insert_notification(conn, event_id, d=T0 - timedelta(seconds=1)) is None
         assert self.insert_notification(conn, uuid.uuid4()) is None  # unknown event
+
+    def test_reminder_checks(self, conn, event_id):
+        """Migration 0008 (B-11): a reminder names its checkpoint and deadline; each checkpoint
+        once per event."""
+        deadline = T0 + timedelta(days=10)
+        reminder = {"t": "reminder", "rd": deadline}
+        assert self.insert_notification(conn, event_id, p=50, **reminder)
+        assert self.insert_notification(conn, event_id, p=50, **reminder) is None  # once
+        assert self.insert_notification(conn, event_id, p=80, **reminder)
+        assert self.insert_notification(conn, event_id, p=60, **reminder) is None
+        assert self.insert_notification(conn, event_id, t="reminder") is None  # no checkpoint
+        assert self.insert_notification(conn, event_id, p=100, t="reminder") is None  # no deadline
+        assert self.insert_notification(conn, event_id, p=100, rd=deadline) is None  # a flag
+        # Flag notifications aren't limited: the index only covers reminders.
+        assert self.insert_notification(conn, event_id) and self.insert_notification(conn, event_id)
 
     @pytest.mark.parametrize(
         ("types", "ok"),

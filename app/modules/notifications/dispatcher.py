@@ -43,7 +43,7 @@ def retry_delay(attempts: int) -> timedelta:
 
 def delivery_body(notification: Notification) -> bytes:
     """The JSON a webhook receives. Stable bytes, so the signature can be checked."""
-    document = {
+    document: dict[str, object] = {
         "notification_id": str(notification.id),
         "notification_type": notification.notification_type,
         "event_id": str(notification.event_id),
@@ -51,6 +51,12 @@ def delivery_body(notification: Notification) -> bytes:
         "deliver_by": notification.deliver_by.isoformat(),
         "event": notification.payload,
     }
+    if notification.reminder_percent is not None and notification.reminder_deadline_utc:
+        # B-11: which checkpoint this is, and the deadline it counts towards.
+        document["reminder"] = {
+            "elapsed_percent": notification.reminder_percent,
+            "deadline_utc": notification.reminder_deadline_utc.isoformat(),
+        }
     return json.dumps(document, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 

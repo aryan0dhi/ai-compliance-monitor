@@ -45,6 +45,10 @@ class EventRepository(Protocol):
 
     def open_gap_for_system(self, system_id: UUID) -> Event | None: ...
 
+    def ids_in_state(self, state: EventState) -> list[UUID]:
+        """Ids of the events in this state, oldest detected first (worker sweeps)."""
+        ...
+
     def list(self, filters: EventFilters, *, limit: int, offset: int) -> tuple[list[Event], int]:
         """Matching events, newest detected_at first, plus the total match count."""
         ...
@@ -114,6 +118,12 @@ class SqlEventRepository:
     def open_gap_for_system(self, system_id: UUID) -> Event | None:
         stmt = select(Event).where(_open_gap_filter(), Event.system_id == system_id)
         return self._session.scalars(stmt).first()
+
+    def ids_in_state(self, state: EventState) -> list[UUID]:
+        stmt = (
+            select(Event.id).where(Event.state == state.value).order_by(Event.detected_at, Event.id)
+        )
+        return list(self._session.scalars(stmt))
 
     def list(self, filters: EventFilters, *, limit: int, offset: int) -> tuple[list[Event], int]:
         items = list(self._session.scalars(build_list_query(filters, limit=limit, offset=offset)))

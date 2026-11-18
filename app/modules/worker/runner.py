@@ -21,6 +21,8 @@ from app.modules.monitoring_gaps.service import GapSweepResult, sweep_gaps
 from app.modules.notifications.delivery import WebhookSender, sender_from_settings
 from app.modules.notifications.dispatcher import DispatchResult, dispatch_due
 from app.modules.notifications.interface import Notifier, get_notifier
+from app.modules.notifications.outbox import notify_max_delay
+from app.modules.review.reminders import ReminderSweepResult, sweep_reminders
 from app.modules.worker.models import WorkerHeartbeat
 
 logger = logging.getLogger(__name__)
@@ -34,6 +36,7 @@ OVERDUE_LOOKBACK = timedelta(days=1)
 @dataclass
 class TickResult:
     gaps: GapSweepResult | None = None
+    reminders: ReminderSweepResult | None = None
     dispatch: DispatchResult | None = None
     newly_overdue: int = 0
     errors: list[str] = field(default_factory=list)
@@ -71,6 +74,14 @@ class Worker:
         except Exception:
             logger.exception("gap sweep failed")
             result.errors.append("gaps")
+        try:
+            # Before dispatch, so a reminder that falls due goes out in the same pass.
+            result.reminders = sweep_reminders(
+                self._uow_factory, clock=clock, max_delay=notify_max_delay()
+            )
+        except Exception:
+            logger.exception("reminder sweep failed")
+            result.errors.append("reminders")
         try:
             result.dispatch = dispatch_due(
                 self._uow_factory,

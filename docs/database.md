@@ -13,6 +13,7 @@ to [spec-decisions.md](spec-decisions.md).
 | `0005` | `harm_field` | REQ-07 (B-07) |
 | `0006` | `disposition`; `DISPOSITION` ledger entry type | REQ-08a/b, REQ-09 (B-08, B-09) |
 | `0007` | `deadline_utc` on `disposition` (backfilled) | REQ-10 (B-10, D-23) |
+| `0008` | `reminder_percent`, `reminder_deadline_utc` on `notification` | REQ-11 (B-11, D-24) |
 
 ## Diagram
 
@@ -211,6 +212,11 @@ Every tier a reviewer assigns to a breach event (B-08, B-09). Primary key `(even
   `NOTIFY_MAX_DELAY_S`. `dispatched_at` stays NULL until a subscribed webhook exists.
 - `notification_delivery` is one row per (notification, webhook), with status, attempts, the
   next attempt time and the last error. Partial indexes serve the worker's two queries.
+- **Reminders (REQ-11, migration 0008).** A `reminder` row records its checkpoint
+  (`reminder_percent`: 50, 80 or 100) and the deadline in force when it was queued
+  (`reminder_deadline_utc`); other types leave both NULL (`ck_notification_reminder_fields_match_type`).
+  `uq_notification_reminder_once` (unique on `event_id, reminder_percent` where set) sends each
+  checkpoint once per event, even after a revision moves the deadline.
 
 ### Monitoring gaps (module `monitoring_gaps`, REQ-02) on `event`
 - `monitored_system.gap_missed_intervals` (default 3) sets the timeout per system.

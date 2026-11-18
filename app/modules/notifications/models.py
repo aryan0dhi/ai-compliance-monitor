@@ -66,6 +66,22 @@ class Notification(Base):
             postgresql_where=text("dispatched_at IS NULL"),
         ),
         Index("ix_notification_deliver_by", "deliver_by"),
+        # REQ-11 / B-11: a reminder carries its checkpoint and the deadline it counts towards;
+        # nothing else does.
+        CheckConstraint(
+            f"(notification_type = '{NotificationType.REMINDER}') = (reminder_percent IS NOT NULL)"
+            " AND (reminder_percent IS NULL) = (reminder_deadline_utc IS NULL)",
+            name="reminder_fields_match_type",
+        ),
+        CheckConstraint("reminder_percent IN (50, 80, 100)", name="reminder_percent_known"),
+        # Each checkpoint is sent once per event, even after a revision moves the deadline.
+        Index(
+            "uq_notification_reminder_once",
+            "event_id",
+            "reminder_percent",
+            unique=True,
+            postgresql_where=text("reminder_percent IS NOT NULL"),
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
@@ -79,6 +95,10 @@ class Notification(Base):
     # When delivery rows were created. NULL while no webhook is subscribed, so a webhook
     # registered later still receives it.
     dispatched_at: Mapped[datetime | None]
+    # Reminders only (B-11): the share of the window from A to the deadline that had elapsed,
+    # and the deadline in force when the reminder was queued.
+    reminder_percent: Mapped[int | None]
+    reminder_deadline_utc: Mapped[datetime | None]
 
 
 class NotificationDelivery(Base):

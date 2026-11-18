@@ -40,6 +40,10 @@ class NotificationRepository(Protocol):
         """Notifications whose deliver_by is in (after, until] and that no webhook received yet."""
         ...
 
+    def reminder_percents(self, event_id: UUID) -> set[int]:
+        """The reminder checkpoints already queued for the event (B-11)."""
+        ...
+
 
 class WebhookRepository(Protocol):
     def add(self, webhook: Webhook) -> None: ...
@@ -102,6 +106,12 @@ class SqlNotificationRepository:
             .where(Notification.deliver_by > after, Notification.deliver_by <= until, ~delivered)
         )
         return self._session.scalar(stmt) or 0
+
+    def reminder_percents(self, event_id: UUID) -> set[int]:
+        stmt = select(Notification.reminder_percent).where(
+            Notification.event_id == event_id, Notification.reminder_percent.is_not(None)
+        )
+        return {p for p in self._session.scalars(stmt) if p is not None}
 
 
 class SqlWebhookRepository:

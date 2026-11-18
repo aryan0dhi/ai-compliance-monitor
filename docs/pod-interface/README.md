@@ -142,7 +142,9 @@ deployment provides.
   `revision_history` entry carries the deadline it set.
 - **B-11 Reminders (REQ-11, AC-12).** For a serious-tier event, each webhook registered for
   `reminder` receives exactly one delivery when service-clock time reaches 50 %, 80 % and 100 % of
-  the window from `A` to `deadline_utc`, and none at 49 %, 79 % or 99 %.
+  the window from `A` to `deadline_utc`, and none at 49 %, 79 % or 99 %. **Proposed** (D-24):
+  checkpoints passed together are all sent; after a revision the remaining checkpoints follow the
+  new deadline and sent ones aren't repeated; `CLOSED` events get none.
 - **B-15 Risk indicator (REQ-15, AC-17).** `detected_at` is set once at flagging and never
   changes; it stays visible next to `deadline_utc`.
 
@@ -222,6 +224,7 @@ Each team adds its deployment to the pod registry with:
 | D-16 | Standard fixtures and scenarios file (B-20, B-24) | Every test's inputs |
 | new | `/v1/meta`, `/v1/me`, `GET /v1/test/clock`, report submission, 30 s settle time (B-21) | Discovery, AC-15 identity, timing |
 | D-03 | `REPORT_READY`/`SUBMITTED` are not event states; the event stays `DISPOSITIONED` and the report carries `assembled_at`/`submitted_at` | Phase 5 assertions |
+| D-24 | Reminder catch-up, revisions and closing | AC-12 reminder counts |
 | D-23 | Tier order by days, `A` = first serious assignment, same tier keeps the deadline | Phase 4 deadline assertions |
 | D-22 | Full `revision_history`, blank rationale `400`, confirmations in the disposition body, Ex-2 confirms its fields first | Phase 4 disposition assertions |
 

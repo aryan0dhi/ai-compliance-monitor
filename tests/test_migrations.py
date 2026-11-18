@@ -69,7 +69,7 @@ def _create_index_statements(sql: str) -> set[str]:
 
 def test_single_head():
     heads = ScriptDirectory.from_config(_config()).get_heads()
-    assert heads == ["0007"], heads
+    assert heads == ["0008"], heads
 
 
 @pytest.fixture(scope="module")
@@ -111,6 +111,13 @@ def test_downgrade_drops_everything():
     sql = _offline_sql("downgrade", "0002:0001")
     for table in ["event", "threshold_version", "metric_sample", "monitored_system"]:
         assert f"DROP TABLE {table};" in sql
+
+
+def test_downgrade_0008_drops_the_reminder_columns():
+    sql = _offline_sql("downgrade", "0008:0007")
+    assert "DROP INDEX uq_notification_reminder_once;" in sql
+    for column in ("reminder_percent", "reminder_deadline_utc"):
+        assert f"ALTER TABLE notification DROP COLUMN {column};" in sql
 
 
 def test_downgrade_0007_drops_the_deadline():
