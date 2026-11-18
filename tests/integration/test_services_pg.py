@@ -29,6 +29,7 @@ from app.modules.metrics.service import (
     ingest_metric,
 )
 from app.modules.notifications.interface import get_notifier
+from app.modules.review.models import HarmField, HarmFieldName
 from app.modules.systems.models import MonitoredSystem
 from app.modules.thresholds.models import Direction
 from app.modules.thresholds.service import ThresholdConfigError, add_threshold_version
@@ -93,6 +94,25 @@ class TestIngestion:
         result = submit(make_uow, system_id, value, metric_name=metric, metric_type=mtype)
         assert (result.flagged_event_id is not None) is flags
 
+    def test_breach_opens_four_pending_harm_fields(self, make_uow, seed, pg_sessionmaker):
+        """REQ-07 / B-07 / D-20, in the flagging transaction."""
+        system_id, drift_id, _ = seed(harm_fields=["fundamental_rights"])
+        result = submit(make_uow, system_id, "0.35")
+        with pg_sessionmaker() as s:
+            rows = s.scalars(select(HarmField).where(HarmField.event_id == result.flagged_event_id))
+            fields = {f.name: f for f in rows}
+        assert set(fields) == {h.value for h in HarmFieldName}
+        assert {f.status for f in fields.values()} == {"PENDING"}
+        assert fields["fundamental_rights"].prefill_evidence == (
+            "drift_score was 0.35 at 2026-09-27T20:00:00Z, above the threshold of 0.30 "
+            f"(threshold version {drift_id})."
+        )
+        assert [n for n, f in fields.items() if f.prefill_evidence is None] == [
+            "health_safety",
+            "critical_infrastructure",
+            "property_environment",
+        ]
+
     def test_ledger_failure_persists_nothing(self, make_uow, seed, pg_sessionmaker):
         system_id, _, _ = seed()
         failing = RecordingLedger(fail_with=UnimplementedError("x", "REQ-06", "ledger"))
@@ -100,6 +120,7 @@ class TestIngestion:
             submit(make_uow, system_id, "0.35", ledger=failing)
         assert count(pg_sessionmaker, MetricSample) == 0
         assert count(pg_sessionmaker, Event) == 0
+        assert count(pg_sessionmaker, HarmField) == 0
         with pg_sessionmaker() as s:
             assert s.get(MonitoredSystem, system_id).last_seen_at is None
 
@@ -206,8 +227,8 @@ class TestEventQueries:
         _, _, ids = events
         ledger = RecordingLedger()
         viewer = user_principal(Role.VIEWER)
-        event = get_event(ids[0], principal=viewer, uow=make_uow(), ledger=ledger)
-        assert event.id == ids[0]
+        record = get_event(ids[0], principal=viewer, uow=make_uow(), ledger=ledger)
+        assert record.event.id == ids[0]
         assert ledger.calls[0]["entry_type"] == "VIEW"
         assert ledger.calls[0]["session"] is not None  # a real session was passed
 

@@ -298,9 +298,21 @@ class TestGetEvents:
         assert body["threshold_value"] == 0.30
         assert body["detected_at"] == "2026-09-27T20:01:00Z"
         assert body["retain_until"] == "2027-03-27T20:01:00Z"
-        # Phase 4 fields: present per Section 5.2, not yet populated.
+        # B-07: all four Art. 3(49) fields, PENDING. This system lists none, so none is prefilled.
+        pending = {
+            "status": "PENDING",
+            "prefill_evidence": None,
+            "confirmed_by": None,
+            "confirmed_at": None,
+        }
+        assert body["harm_fields"] == {
+            "health_safety": pending,
+            "critical_infrastructure": pending,
+            "fundamental_rights": pending,
+            "property_environment": pending,
+        }
+        # Disposition fields (#38/#39): not yet populated.
         assert body["deadline_utc"] is None
-        assert body["harm_fields"] is None
         assert body["revision_history"] == []
         assert ledger.calls[-1]["entry_type"] == "VIEW"
 

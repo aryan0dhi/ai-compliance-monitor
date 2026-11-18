@@ -9,6 +9,7 @@ from app.core.config import get_settings
 from app.db.uow import UnitOfWork
 from app.modules.auth.models import AppUser
 from app.modules.systems.models import MonitoredSystem
+from app.modules.systems.service import harm_field_values
 from app.modules.testing.fixtures import FIXTURE_VALID_FROM, baseline_systems
 from app.modules.testing.models import SimulatedClockState
 from app.modules.thresholds.models import ThresholdVersion
@@ -20,6 +21,7 @@ RESET_TABLES = (
     "notification",
     "webhook",
     "ledger_entry",
+    "harm_field",
     "event",
     "threshold_version",
     "metric_sample",
@@ -53,6 +55,7 @@ def reset_test_environment(uow: UnitOfWork) -> None:
                 "name": fixture.name,
                 "sampling_interval_s": fixture.sampling_interval_s,
                 "gap_missed_intervals": fixture.gap_missed_intervals,
+                "harm_fields": harm_field_values(fixture.harm_fields),
             }
             session.execute(
                 insert(MonitoredSystem)

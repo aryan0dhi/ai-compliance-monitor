@@ -88,8 +88,8 @@ class TestGetEvent:
     def test_returns_event_and_logs_view(self, uow, ledger, seeded, role):
         _, _, events = seeded
         principal = user_principal(role)
-        event = get_event(events[0].id, principal=principal, uow=uow, ledger=ledger)
-        assert event is events[0]
+        record = get_event(events[0].id, principal=principal, uow=uow, ledger=ledger)
+        assert record.event is events[0]
         assert ledger.calls == [
             {
                 "session": None,

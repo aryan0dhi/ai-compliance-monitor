@@ -84,6 +84,21 @@ def test_invalid_requests_exit_2(uow, capsys, args):
     assert capsys.readouterr().err.startswith("error:")
 
 
+def test_create_system_with_harm_fields(uow, capsys):
+    args = ["--harm-field", "health_safety", "--harm-field", "fundamental_rights"]
+    repeat = ["--harm-field", "health_safety"]
+    assert cli(uow, "create-system", "--name", "triage", *args, *repeat) == 0
+    system = uow.systems.get(UUID(field(capsys.readouterr().out, "system_id")))
+    # Stored once each, in Art. 3(49) order (D-20).
+    assert system.harm_fields == ["health_safety", "fundamental_rights"]
+
+
+def test_create_system_defaults_to_no_harm_fields(uow, capsys):
+    assert cli(uow, "create-system", "--name", "plain") == 0
+    system = uow.systems.get(UUID(field(capsys.readouterr().out, "system_id")))
+    assert system.harm_fields == []
+
+
 def test_duplicate_user_is_refused(uow, capsys):
     cli(uow, "create-user", "--name", "dup", "--role", "admin")
     assert cli(uow, "create-user", "--name", "dup", "--role", "admin") == 2

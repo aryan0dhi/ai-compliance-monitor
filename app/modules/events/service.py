@@ -16,6 +16,7 @@ from app.modules.events.repository import EventFilters
 from app.modules.ledger.interface import LedgerEntryType, LedgerWriter
 from app.modules.metrics.models import MetricSample
 from app.modules.notifications.interface import NotificationType, Notifier
+from app.modules.review.models import HarmField
 from app.modules.thresholds.models import ThresholdVersion
 
 # Roles allowed to read events. Monitored-system keys only submit metrics (Section 5.1).
@@ -36,6 +37,15 @@ class EventPage:
     total: int
     limit: int
     offset: int
+
+
+@dataclass(frozen=True)
+class EventRecord:
+    """One event as GET /v1/events/{id} returns it: the row plus its harm fields (B-07)."""
+
+    event: Event
+    # Art. 3(49) order; empty for monitoring gaps (INV-12) and breaches flagged before Phase 4.
+    harm_fields: list[HarmField]
 
 
 def event_payload(event: Event) -> dict[str, Any]:
@@ -133,8 +143,8 @@ def get_event(
     principal: Principal,
     uow: UnitOfWork,
     ledger: LedgerWriter,
-) -> Event:
-    """Return one event and record the view in the ledger (REQ-14, Section 5.1).
+) -> EventRecord:
+    """Return one event with its harm fields and record the view in the ledger (REQ-14).
 
     The VIEW entry is written in the same transaction as the read; if it can't be written, the
     request fails rather than returning an unaudited view.
@@ -151,4 +161,5 @@ def get_event(
             payload={"event_id": str(event.id)},
             event_id=event.id,
         )
-    return event
+        harm_fields = uow.harm_fields.for_event(event.id)
+    return EventRecord(event=event, harm_fields=harm_fields)

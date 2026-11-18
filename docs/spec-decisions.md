@@ -26,6 +26,7 @@ final, because cross-team tests depend on them.
 | D-17 | AC-01 cadence: what happens to a sample more than 10 s off schedule | Interim, **pod** |
 | D-18 | AC-05 checkpoints: calendar 5mo29d can fall after the 6-month minimum | Open, **pod** |
 | D-19 | Course testing interface: `/test/setup`, `/test/report` sessions, access, coverage | Interim (team) |
+| D-20 | REQ-07 prefill: which harm fields a breach prefills, and with what evidence | Decided (team, 2026-11-17); **pod** to confirm |
 
 ## Agenda for the next pod meeting
 
@@ -382,6 +383,25 @@ choices to each team. Spec: [docs/testing-interface/system-openapi.yaml](testing
   `coverage run`), `covered` and `total` are `null` and `basis` says why.
 - **Lifetime.** Sessions are in memory. After an API restart their reports are `404`, and the
   tester sets up again. The last 100 sessions are kept.
+
+## D-20: Harm-field prefill (REQ-07, AC-07, B-07, Model 5 Ex-1)
+
+**Gap.** B-07 says each of the four Art. 3(49) fields gets `prefill_evidence` "drawn from the event
+record, or `null` when there is none (never guessed)". Model 5 Ex-1 expects a loan-scorer accuracy
+breach to prefill `fundamental_rights` and leave the other three blank, but nothing in a breach
+record (metric, value, threshold) says which consequence it concerns.
+
+**Decision (team, 2026-11-17; pod to confirm).** Which fields are prefilled is **configuration of
+the monitored system**, never inferred from the metric:
+
+- `monitored_system.harm_fields` lists the fields the system's use can affect (empty by default).
+  Set with `python -m app.cli create-system --harm-field <name>` (repeatable), and per system in
+  `docs/pod-interface/fixtures.json` (`"harm_fields"`, optional). loan-scorer lists
+  `fundamental_rights` (Annex III credit scoring); resume-ranker lists none, as no scenario
+  checks it.
+- On a breach, each listed field's `prefill_evidence` is built from the event's own breach facts
+  (metric, observed value, threshold, time). Every other field is `null`. All four start
+  `PENDING`; the reviewer still confirms each one (REQ-07, REQ-08a).
 
 ## Other notes
 

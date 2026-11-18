@@ -15,6 +15,7 @@ from uuid import UUID
 
 from app.core.config import get_settings
 from app.modules.metrics.models import MetricType
+from app.modules.review.models import HarmFieldName
 from app.modules.thresholds.models import Direction
 
 # Thresholds apply to every sample timestamped after this.
@@ -40,6 +41,8 @@ class FixtureSystem:
     sampling_interval_s: int
     gap_missed_intervals: int
     thresholds: tuple[FixtureThreshold, ...]
+    # REQ-07 (D-20): fields prefilled on this system's breaches. Optional in the file.
+    harm_fields: tuple[HarmFieldName, ...] = ()
 
 
 def _parse_threshold(raw: dict[str, Any]) -> FixtureThreshold:
@@ -62,6 +65,7 @@ def parse_fixtures(data: dict[str, Any]) -> tuple[FixtureSystem, ...]:
                 sampling_interval_s=int(s["sampling_interval_s"]),
                 gap_missed_intervals=int(s["gap_missed_intervals"]),
                 thresholds=tuple(_parse_threshold(t) for t in s["thresholds"]),
+                harm_fields=tuple(HarmFieldName(h) for h in s.get("harm_fields", [])),
             )
             for s in data["systems"]
         )
