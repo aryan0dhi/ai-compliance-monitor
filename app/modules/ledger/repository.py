@@ -1,4 +1,4 @@
-"""Read access to ledger_entry. Writes go through the LedgerWriter only."""
+"""Read access to ledger_entry (writes go through the LedgerWriter only), and ledger_check."""
 
 from typing import Protocol
 from uuid import UUID
@@ -6,7 +6,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.modules.ledger.models import LedgerEntry
+from app.modules.ledger.models import LedgerCheck, LedgerEntry
 
 
 class LedgerRepository(Protocol):
@@ -39,3 +39,37 @@ class SqlLedgerRepository:
     def for_event(self, event_id: UUID) -> list[LedgerEntry]:
         stmt = select(LedgerEntry).where(LedgerEntry.event_id == event_id).order_by(LedgerEntry.seq)
         return list(self._session.scalars(stmt))
+
+
+class LedgerCheckRepository(Protocol):
+    def add(self, check: LedgerCheck) -> None: ...
+
+    def latest(self) -> LedgerCheck | None:
+        """The most recent check, if any."""
+        ...
+
+    def latest_valid(self) -> LedgerCheck | None:
+        """The most recent check that passed: the head later checks compare against."""
+        ...
+
+
+class SqlLedgerCheckRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, check: LedgerCheck) -> None:
+        self._session.add(check)
+        self._session.flush()
+
+    def latest(self) -> LedgerCheck | None:
+        stmt = select(LedgerCheck).order_by(LedgerCheck.checked_at.desc(), LedgerCheck.id).limit(1)
+        return self._session.scalars(stmt).first()
+
+    def latest_valid(self) -> LedgerCheck | None:
+        stmt = (
+            select(LedgerCheck)
+            .where(LedgerCheck.valid)
+            .order_by(LedgerCheck.checked_at.desc(), LedgerCheck.id)
+            .limit(1)
+        )
+        return self._session.scalars(stmt).first()

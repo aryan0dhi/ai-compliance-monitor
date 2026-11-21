@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.clock import Clock, SystemClock, get_clock
 from app.db.uow import SqlAlchemyUnitOfWork, UnitOfWork
+from app.modules.ledger.checks import LedgerCheckResult, run_ledger_check
 from app.modules.ledger.interface import LedgerWriter, get_ledger
 from app.modules.monitoring_gaps.service import GapSweepResult, sweep_gaps
 from app.modules.notifications.delivery import WebhookSender, sender_from_settings
@@ -37,6 +38,7 @@ OVERDUE_LOOKBACK = timedelta(days=1)
 class TickResult:
     gaps: GapSweepResult | None = None
     reminders: ReminderSweepResult | None = None
+    ledger_check: LedgerCheckResult | None = None
     dispatch: DispatchResult | None = None
     newly_overdue: int = 0
     errors: list[str] = field(default_factory=list)
@@ -53,6 +55,7 @@ class Worker:
         clock_provider: Callable[[], Clock],
         max_attempts: int,
         heartbeat: Callable[[], None] | None = None,
+        ledger_check_interval: timedelta = timedelta(days=1),
     ) -> None:
         self._uow_factory = uow_factory
         self._ledger = ledger
@@ -61,6 +64,7 @@ class Worker:
         self._clock_provider = clock_provider
         self._max_attempts = max_attempts
         self._heartbeat = heartbeat
+        self._ledger_check_interval = ledger_check_interval
         self._overdue_checked_until: datetime | None = None
 
     def run_once(self) -> TickResult:
@@ -82,6 +86,17 @@ class Worker:
         except Exception:
             logger.exception("reminder sweep failed")
             result.errors.append("reminders")
+        try:
+            # Before dispatch, so an alert goes out in the same pass (#71).
+            result.ledger_check = run_ledger_check(
+                self._uow_factory(),
+                clock=clock,
+                interval=self._ledger_check_interval,
+                max_delay=notify_max_delay(),
+            )
+        except Exception:
+            logger.exception("ledger check failed to run")
+            result.errors.append("ledger_check")
         try:
             result.dispatch = dispatch_due(
                 self._uow_factory,
@@ -180,6 +195,7 @@ def main() -> int:
         clock_provider=get_clock,
         max_attempts=settings.webhook_max_attempts,
         heartbeat=lambda: record_heartbeat(session_factory, worker_id),
+        ledger_check_interval=timedelta(seconds=settings.ledger_check_interval_s),
     )
     with leadership(get_engine(), stop, settings.worker_poll_interval_s) as conn:
         if conn is None:

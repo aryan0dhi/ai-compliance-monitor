@@ -15,7 +15,12 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.modules.auth.repository import AuthRepository, SqlAuthRepository
 from app.modules.events.repository import EventRepository, SqlEventRepository
-from app.modules.ledger.repository import LedgerRepository, SqlLedgerRepository
+from app.modules.ledger.repository import (
+    LedgerCheckRepository,
+    LedgerRepository,
+    SqlLedgerCheckRepository,
+    SqlLedgerRepository,
+)
 from app.modules.metrics.repository import MetricRepository, SqlMetricRepository
 from app.modules.notifications.repository import (
     NotificationRepository,
@@ -59,6 +64,8 @@ class UnitOfWork(Protocol):
     @property
     def ledger(self) -> LedgerRepository: ...
     @property
+    def ledger_checks(self) -> LedgerCheckRepository: ...
+    @property
     def notifications(self) -> NotificationRepository: ...
     @property
     def webhooks(self) -> WebhookRepository: ...
@@ -91,6 +98,7 @@ class SqlAlchemyUnitOfWork:
         self.reports: ReportRepository = SqlReportRepository(session)
         self.auth: AuthRepository = SqlAuthRepository(session)
         self.ledger: LedgerRepository = SqlLedgerRepository(session)
+        self.ledger_checks: LedgerCheckRepository = SqlLedgerCheckRepository(session)
         self.notifications: NotificationRepository = SqlNotificationRepository(session)
         self.webhooks: WebhookRepository = SqlWebhookRepository(session)
         return self

@@ -24,7 +24,7 @@ from app.modules.auth.principal import Principal, Role
 from app.modules.events.models import OPEN_GAP_STATES, Event, EventState, EventType
 from app.modules.events.repository import EventFilters
 from app.modules.ledger.chain import GENESIS_HASH, compute_entry_hash
-from app.modules.ledger.models import LedgerEntry, LedgerEntryType
+from app.modules.ledger.models import LedgerCheck, LedgerEntry, LedgerEntryType
 from app.modules.metrics.models import MetricSample
 from app.modules.notifications.delivery import SendResult
 from app.modules.notifications.models import (
@@ -185,6 +185,20 @@ class FakeDispositionRepository:
         return sorted((d for (e, _), d in self.rows.items() if e == event_id), key=lambda d: d.seq)
 
 
+class FakeLedgerCheckRepository:
+    def __init__(self) -> None:
+        self.rows: list[LedgerCheck] = []
+
+    def add(self, check: LedgerCheck) -> None:
+        self.rows.append(check)
+
+    def latest(self) -> LedgerCheck | None:
+        return max(self.rows, key=lambda c: c.checked_at, default=None)
+
+    def latest_valid(self) -> LedgerCheck | None:
+        return max((c for c in self.rows if c.valid), key=lambda c: c.checked_at, default=None)
+
+
 class FakeReportRepository:
     def __init__(self) -> None:
         self.rows: dict[tuple[UUID, int], Report] = {}
@@ -320,6 +334,7 @@ class FakeUnitOfWork:
         self.reports = FakeReportRepository()
         self.auth = FakeAuthRepository()
         self.ledger = FakeLedgerRepository()
+        self.ledger_checks = FakeLedgerCheckRepository()
         self.webhooks = FakeWebhookRepository()
         self.notifications = FakeNotificationRepository(self.webhooks)
         self.commits = 0
@@ -336,6 +351,7 @@ class FakeUnitOfWork:
             self.reports,
             self.auth,
             self.ledger,
+            self.ledger_checks,
             self.webhooks,
             self.notifications,
         ]
