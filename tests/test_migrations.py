@@ -69,7 +69,7 @@ def _create_index_statements(sql: str) -> set[str]:
 
 def test_single_head():
     heads = ScriptDirectory.from_config(_config()).get_heads()
-    assert heads == ["0008"], heads
+    assert heads == ["0009"], heads
 
 
 @pytest.fixture(scope="module")
@@ -111,6 +111,18 @@ def test_downgrade_drops_everything():
     sql = _offline_sql("downgrade", "0002:0001")
     for table in ["event", "threshold_version", "metric_sample", "monitored_system"]:
         assert f"DROP TABLE {table};" in sql
+
+
+def test_downgrade_0009_drops_report_and_its_ledger_types():
+    sql = _offline_sql("downgrade", "0009:0008")
+    assert "DROP TABLE report;" in sql
+    assert "'NOTIFIED', 'DISPOSITION'))" in sql
+    assert "'REPORT_ASSEMBLED'" not in sql
+
+
+def test_upgrade_0009_allows_report_ledger_entries():
+    sql = _offline_sql("upgrade", "0008:0009")
+    assert "'DISPOSITION', 'REPORT_ASSEMBLED', 'REPORT_SUBMITTED')" in sql
 
 
 def test_downgrade_0008_drops_the_reminder_columns():

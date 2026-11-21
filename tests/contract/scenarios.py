@@ -16,7 +16,13 @@ from tests.contract.fixtures import Fixtures, Scenario, Step, parse_duration
 # Which configured key acts as each fixture system.
 SYSTEM_KEYS = {"loan-scorer": "system", "resume-ranker": "resume_ranker"}
 # Actions in the fixtures file that no handler runs yet (Phase 4/5, or covered by other tests).
-DEFERRED_ACTIONS = frozenset({"get_report", "await_gap"} | {"tamper_export", "await_alert"})
+DEFERRED_ACTIONS = frozenset({"await_gap"} | {"tamper_export", "await_alert"})
+HARM_FIELDS = {
+    "health_safety",
+    "critical_infrastructure",
+    "fundamental_rights",
+    "property_environment",
+}
 # detected_at may differ from the service clock reads around the request by this much.
 CLOCK_TOLERANCE = timedelta(seconds=1)
 # A deadline is checked against the step's offset from the scenario start; the assignment
@@ -314,6 +320,39 @@ class ScenarioRun:
         anchor = next(parse(h["recorded_at"]) for h in self.history if h["tier"] != "NOT_SERIOUS")
         window = parse_duration(step.args["window_end"]) - parse_duration(step.args["window_start"])
         assert deadline - anchor == window, (anchor, deadline)
+
+    def do_get_report(self, step: Step) -> None:
+        """B-12 / AC-13: once a serious tier is assigned, the report of the current determination,
+        the same document on every call; before that (or after NOT_SERIOUS), 409."""
+        key, want = self.key(step.actor), step.expect
+        path = f"/v1/events/{self.event_id}/report"
+        audit_before = self.audit() if "ledger_records_attempt" in want else None
+        resp = self.api.call("GET", path, as_=key)
+        assert resp.status_code == want.get("status", 200), resp.text
+        if audit_before is not None:
+            new = self.audit()[len(audit_before) :]
+            assert len(new) == 1 and new[0]["actor_id"] == self.actor_id(key), new
+        if "state" in want:
+            assert self.listed_state() == want["state"]
+        if resp.status_code >= 400:
+            assert_error_body(resp)
+            return
+        report = resp.json()
+        for name in want.get("non_null", []):
+            assert report.get(name) is not None, (name, report)
+        assert report["event"]["event_id"] == self.event_id, report["event"]
+        assert set(report["harm_fields"]) == HARM_FIELDS, report["harm_fields"]
+        # The determination reported on is the event's current (latest) disposition.
+        assert self.history, "get_report needs a serious disposition first"
+        current = self.history[-1]
+        assert report["determination"]["tier"] == current["tier"], report["determination"]
+        assert report["determination"]["reviewer_id"] == current["reviewer_id"]
+        assert parse(report["determination_at"]) == parse(current["recorded_at"])
+        assert parse(report["deadline_utc"]) == parse(current["deadline_utc"])
+        assert parse(report["detected_at"]) == parse(report["event"]["detected_at"])
+        assert parse(report["assembled_at"]) >= parse(report["determination_at"])
+        again = self.api.call("GET", path, as_=key)
+        assert again.status_code == 200 and again.json() == report, again.text
 
 
 HANDLED_ACTIONS = frozenset(

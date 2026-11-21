@@ -1,4 +1,4 @@
-"""Data access for harm_field and disposition."""
+"""Data access for harm_field, disposition and report."""
 
 from typing import Protocol
 from uuid import UUID
@@ -6,7 +6,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.modules.review.models import Disposition, HarmField, HarmFieldName
+from app.modules.review.models import Disposition, HarmField, HarmFieldName, Report
 
 # Response and storage order: Art. 3(49) order, as listed in HarmFieldName.
 _ORDER = {name.value: i for i, name in enumerate(HarmFieldName)}
@@ -52,3 +52,23 @@ class SqlDispositionRepository:
     def for_event(self, event_id: UUID) -> list[Disposition]:
         stmt = select(Disposition).where(Disposition.event_id == event_id).order_by(Disposition.seq)
         return list(self._session.scalars(stmt))
+
+
+class ReportRepository(Protocol):
+    def add(self, report: Report) -> None: ...
+
+    def get(self, event_id: UUID, disposition_seq: int) -> Report | None:
+        """The report assembled from this disposition, if any."""
+        ...
+
+
+class SqlReportRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, report: Report) -> None:
+        self._session.add(report)
+        self._session.flush()
+
+    def get(self, event_id: UUID, disposition_seq: int) -> Report | None:
+        return self._session.get(Report, (event_id, disposition_seq))

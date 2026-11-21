@@ -1,5 +1,5 @@
-"""Review: the Art. 3(49) harm fields of flagged events (REQ-07, B-07) and their dispositions
-(REQ-08a/b, REQ-09, B-08, B-09).
+"""Review: the Art. 3(49) harm fields of flagged events (REQ-07, B-07), their dispositions
+(REQ-08a/b, REQ-09, B-08, B-09) and the Article 73 reports assembled from them (REQ-12, B-12).
 
 HarmFieldName is also used by monitored_system.harm_fields (D-20).
 """
@@ -8,7 +8,7 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, ForeignKey
+from sqlalchemy import CheckConstraint, ForeignKey, ForeignKeyConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, check_in
@@ -124,3 +124,48 @@ class Disposition(Base):
     # The Article 73 deadline in force after this disposition (B-10, review.deadlines). The
     # latest row's value is the event's deadline_utc.
     deadline_utc: Mapped[datetime | None]
+
+
+class Report(Base):
+    """The Article 73 report of one serious-tier determination (REQ-12, B-12, D-25).
+
+    Primary key `(event_id, disposition_seq)`: one report per disposition it was assembled from.
+    `document` is the JSON text returned by `GET /v1/events/{id}/report`, stored once at assembly
+    and never rewritten, so repeated calls return the same bytes; `report_sha256` is its sha256.
+    A revision after assembly gets a report of its own when next requested; earlier ones stay.
+    Only the submission columns change, once, when the reviewer marks the report submitted.
+    """
+
+    __tablename__ = "report"
+    __table_args__ = (
+        # The determination it reports on; that disposition is insert-only too.
+        ForeignKeyConstraint(
+            ["event_id", "disposition_seq"],
+            ["disposition.event_id", "disposition.seq"],
+            ondelete="RESTRICT",
+            name="fk_report_disposition",
+        ),
+        CheckConstraint("report_sha256 ~ '^[0-9a-f]{64}$'", name="report_sha256_hex"),
+        # Submitted by a reviewer at a time, or not at all; a note only comes with a submission.
+        CheckConstraint(
+            "(submitted_at IS NULL) = (submitted_by IS NULL)", name="submitted_by_matches_at"
+        ),
+        CheckConstraint(
+            "submitted_at IS NOT NULL OR submission_note IS NULL", name="note_needs_submission"
+        ),
+    )
+
+    # References the event through fk_report_disposition (disposition.event_id → event.id).
+    event_id: Mapped[UUID] = mapped_column(primary_key=True)
+    disposition_seq: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    document: Mapped[str]
+    report_sha256: Mapped[str]
+    # core.clock time of assembly, and the reviewer whose request assembled it.
+    assembled_at: Mapped[datetime]
+    assembled_by: Mapped[UUID] = mapped_column(ForeignKey("app_user.id", ondelete="RESTRICT"))
+    # Set once by POST /v1/events/{id}/report/submission (the submission itself happens outside).
+    submitted_at: Mapped[datetime | None]
+    submitted_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("app_user.id", ondelete="RESTRICT")
+    )
+    submission_note: Mapped[str | None]

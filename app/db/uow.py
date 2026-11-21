@@ -26,8 +26,10 @@ from app.modules.notifications.repository import (
 from app.modules.review.repository import (
     DispositionRepository,
     HarmFieldRepository,
+    ReportRepository,
     SqlDispositionRepository,
     SqlHarmFieldRepository,
+    SqlReportRepository,
 )
 from app.modules.systems.repository import SqlSystemRepository, SystemRepository
 from app.modules.thresholds.repository import SqlThresholdRepository, ThresholdRepository
@@ -49,6 +51,8 @@ class UnitOfWork(Protocol):
     def harm_fields(self) -> HarmFieldRepository: ...
     @property
     def dispositions(self) -> DispositionRepository: ...
+    @property
+    def reports(self) -> ReportRepository: ...
     @property
     def auth(self) -> AuthRepository: ...
     # Read side only; entries are written through the LedgerWriter.
@@ -84,6 +88,7 @@ class SqlAlchemyUnitOfWork:
         self.events: EventRepository = SqlEventRepository(session)
         self.harm_fields: HarmFieldRepository = SqlHarmFieldRepository(session)
         self.dispositions: DispositionRepository = SqlDispositionRepository(session)
+        self.reports: ReportRepository = SqlReportRepository(session)
         self.auth: AuthRepository = SqlAuthRepository(session)
         self.ledger: LedgerRepository = SqlLedgerRepository(session)
         self.notifications: NotificationRepository = SqlNotificationRepository(session)

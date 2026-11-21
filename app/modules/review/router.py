@@ -1,6 +1,8 @@
-"""POST /v1/events/{event_id}/disposition. HTTP mapping only; logic in review.disposition."""
+"""POST /v1/events/{event_id}/disposition, GET /v1/events/{event_id}/report and
+POST /v1/events/{event_id}/report/submission. HTTP mapping only; logic in review.disposition and
+review.report."""
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from app.core.clock import Clock, get_clock
 from app.core.types import to_internal_id
@@ -16,6 +18,14 @@ from app.modules.review.disposition import (
     authorize_disposition,
     record_disposition,
 )
+from app.modules.review.report import (
+    ReportDenied,
+    ReportUnavailable,
+    authorize_report,
+    get_report,
+    mark_report_submitted,
+)
+from app.modules.review.report_schemas import ReportOut, ReportSubmissionIn, report_body
 from app.modules.review.schemas import DispositionIn
 
 router = APIRouter(prefix="/events", tags=["review"])
@@ -71,3 +81,96 @@ def record_disposition_route(
     except DispositionConflict as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     return EventDetail.from_record(record)
+
+
+_REPORT_RESPONSES: dict[int | str, dict[str, str]] = {
+    401: {"description": "Missing or invalid API key"},
+    403: {"description": "Only reviewer keys read or submit reports (REQ-13)"},
+    404: {"description": "Unknown event_id"},
+}
+
+
+def _report_errors(exc: Exception) -> HTTPException:
+    if isinstance(exc, ReportDenied):
+        return HTTPException(status.HTTP_403_FORBIDDEN, str(exc))
+    if isinstance(exc, EventNotFound):
+        return HTTPException(status.HTTP_404_NOT_FOUND, "event not found")
+    return HTTPException(status.HTTP_409_CONFLICT, str(exc))
+
+
+@router.get(
+    "/{event_id}/report",
+    response_model=ReportOut,
+    operation_id="getReport",
+    tags=["reports"],
+    responses={
+        **_REPORT_RESPONSES,
+        409: {
+            "description": "The event's current tier isn't serious, it has no disposition yet "
+            "(REQ-08a), or it is a monitoring gap (INV-12)"
+        },
+    },
+)
+def get_report_route(
+    event_id: str,
+    principal: Principal = Depends(get_principal),
+    uow: UnitOfWork = Depends(get_uow),
+    ledger: LedgerWriter = Depends(get_ledger),
+    clock: Clock = Depends(get_clock),
+) -> Response:
+    """Submission-ready Article 73 report of the current determination (REQ-12, B-12).
+
+    Assembled on the first call after a serious-tier disposition; every later call returns the
+    same bytes until a revision or the submission mark (D-25).
+    """
+    try:
+        authorize_report(principal)
+        parsed_id = to_internal_id(event_id)
+        if parsed_id is None:
+            raise EventNotFound(event_id)
+        report = get_report(parsed_id, principal=principal, uow=uow, ledger=ledger, clock=clock)
+    except (ReportDenied, EventNotFound, ReportUnavailable) as exc:
+        raise _report_errors(exc) from exc
+    return Response(report_body(report), media_type="application/json")
+
+
+@router.post(
+    "/{event_id}/report/submission",
+    response_model=ReportOut,
+    operation_id="markReportSubmitted",
+    tags=["reports"],
+    responses={
+        **_REPORT_RESPONSES,
+        400: {"description": "Malformed body (note longer than 2000 characters)"},
+        409: {
+            "description": "No report of the current serious-tier determination has been "
+            "assembled yet, or it is already marked submitted"
+        },
+    },
+)
+def mark_report_submitted_route(
+    event_id: str,
+    body: ReportSubmissionIn | None = None,
+    principal: Principal = Depends(get_principal),
+    uow: UnitOfWork = Depends(get_uow),
+    ledger: LedgerWriter = Depends(get_ledger),
+    clock: Clock = Depends(get_clock),
+) -> Response:
+    """Record that the reviewer submitted the report to the authority, which happens outside
+    the system. Returns the report with submitted_at set."""
+    try:
+        authorize_report(principal)
+        parsed_id = to_internal_id(event_id)
+        if parsed_id is None:
+            raise EventNotFound(event_id)
+        report = mark_report_submitted(
+            parsed_id,
+            body.note if body is not None else None,
+            principal=principal,
+            uow=uow,
+            ledger=ledger,
+            clock=clock,
+        )
+    except (ReportDenied, EventNotFound, ReportUnavailable) as exc:
+        raise _report_errors(exc) from exc
+    return Response(report_body(report), media_type="application/json")
