@@ -63,6 +63,8 @@ def _app():
             return system_principal(SYSTEM_ID)
         if request.url.path == "/v1/webhooks":
             return user_principal(Role.ADMIN)
+        if request.url.path.endswith("/disposition"):
+            return user_principal(Role.REVIEWER)
         return user_principal(Role.VIEWER)
 
     app.dependency_overrides.update(

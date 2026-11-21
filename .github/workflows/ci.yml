@@ -369,6 +369,7 @@ jobs:
           issue CONTRACT_VIEWER_KEY --name ci-viewer --role viewer
           issue CONTRACT_ADMIN_KEY --name ci-admin --role admin
           issue CONTRACT_RESUME_RANKER_KEY --name ci-resume-ranker --role system --system-id "$RESUME_RANKER_ID"
+          issue CONTRACT_REVIEWER_KEY --name ci-reviewer --role reviewer
 
       # Runs inside the api container so the worker container can reach the suite's webhook
       # receiver at api:8099 (the worker delivers webhooks, not the api).
@@ -379,7 +380,7 @@ jobs:
           . "$RUNNER_TEMP/contract.env"
           docker compose exec -T \
             -e CONTRACT_SYSTEM_KEY -e CONTRACT_VIEWER_KEY -e CONTRACT_ADMIN_KEY \
-            -e CONTRACT_RESUME_RANKER_KEY \
+            -e CONTRACT_RESUME_RANKER_KEY -e CONTRACT_REVIEWER_KEY \
             -e CONTRACT_BASE_URL=http://localhost:8000 \
             -e CONTRACT_SYSTEM_ID="$SYSTEM_ID" \
             -e CONTRACT_RECEIVER_BIND=0.0.0.0:8099 \
@@ -406,7 +407,8 @@ jobs:
         run: |
           set -eu
           . "$RUNNER_TEMP/contract.env"
-          export CONTRACT_SYSTEM_KEY CONTRACT_VIEWER_KEY CONTRACT_ADMIN_KEY CONTRACT_RESUME_RANKER_KEY
+          export CONTRACT_SYSTEM_KEY CONTRACT_VIEWER_KEY CONTRACT_ADMIN_KEY CONTRACT_RESUME_RANKER_KEY \
+            CONTRACT_REVIEWER_KEY
           export CONTRACT_SYSTEM_ID="$SYSTEM_ID" CONTRACT_WEBHOOKS=on \
             CONTRACT_RECEIVER_BIND=0.0.0.0:8099 \
             CONTRACT_RECEIVER_URL=http://tester:8099/contract-hook

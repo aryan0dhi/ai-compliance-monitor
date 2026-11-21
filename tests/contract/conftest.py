@@ -8,6 +8,7 @@ or a podmate's. Nothing here imports the application. Configure with environment
     CONTRACT_VIEWER_KEY     viewer key                                           (required)
     CONTRACT_ADMIN_KEY      admin key (webhooks, /v1/test/*)                     (required)
     CONTRACT_RESUME_RANKER_KEY  key for the resume-ranker fixture system (Model 5 Ex-2 only)
+    CONTRACT_REVIEWER_KEY   reviewer key (Phase 4 scenario steps: harm fields, disposition)
     CONTRACT_FIXTURES       fixtures file (default docs/pod-interface/fixtures.json, B-20)
     CONTRACT_SYSTEM_ID      default: loan-scorer's id in the fixtures file
     CONTRACT_DRIFT_METRIC / CONTRACT_DRIFT_LIMIT     default: loan-scorer's drift threshold
@@ -102,6 +103,8 @@ def target(fixtures) -> Target:
     }
     if os.environ.get("CONTRACT_RESUME_RANKER_KEY"):
         keys["resume_ranker"] = os.environ["CONTRACT_RESUME_RANKER_KEY"]
+    if os.environ.get("CONTRACT_REVIEWER_KEY"):
+        keys["reviewer"] = os.environ["CONTRACT_REVIEWER_KEY"]
     return Target(
         base_url=_env("CONTRACT_BASE_URL").rstrip("/"),
         keys=keys,

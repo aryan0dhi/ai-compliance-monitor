@@ -131,7 +131,9 @@ deployment provides.
   tier moves it to `DISPOSITIONED`.
 - **B-09 Revisions (REQ-09, AC-10).** Every disposition after the first appends to
   `revision_history`, keeping the previous tier, the reviewer and the time. Nothing is
-  overwritten.
+  overwritten. **Proposed** (D-22): `revision_history` lists the first disposition too, with
+  `previous_tier = null`; field confirmations travel in the disposition body; a blank
+  `NOT_SERIOUS` rationale is `400`.
 - **B-10 Deadlines (REQ-10, AC-11).** `deadline_utc = A + days(tier)`, where `A` is the **first**
   assignment time and days are 10 (DEATH), 2 (CRITICAL_INFRASTRUCTURE_OR_WIDESPREAD) or 15
   (OTHER_SERIOUS). Days are calendar days (exactly 24 h each) by default. Revising to a stricter
@@ -221,6 +223,7 @@ Each team adds its deployment to the pod registry with:
 | D-16 | Standard fixtures and scenarios file (B-20, B-24) | Every test's inputs |
 | new | `/v1/meta`, `/v1/me`, `GET /v1/test/clock`, report submission, 30 s settle time (B-21) | Discovery, AC-15 identity, timing |
 | D-03 | `REPORT_READY`/`SUBMITTED` are not event states; the event stays `DISPOSITIONED` and the report carries `assembled_at`/`submitted_at` | Phase 5 assertions |
+| D-22 | Full `revision_history`, blank rationale `400`, confirmations in the disposition body, Ex-2 confirms its fields first | Phase 4 disposition assertions |
 
 ## Changes from Phase 2 Section 5
 

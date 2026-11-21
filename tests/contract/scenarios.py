@@ -16,8 +16,7 @@ from tests.contract.fixtures import Fixtures, Scenario, Step, parse_duration
 SYSTEM_KEYS = {"loan-scorer": "system", "resume-ranker": "resume_ranker"}
 # Actions in the fixtures file that no handler runs yet (Phase 4/5, or covered by other tests).
 DEFERRED_ACTIONS = frozenset(
-    {"confirm_fields", "disposition", "await_reminders", "get_report", "await_gap"}
-    | {"tamper_export", "await_alert"}
+    {"await_reminders", "get_report", "await_gap"} | {"tamper_export", "await_alert"}
 )
 # A breach is FLAGGED until a webhook accepts its flag notification, then UNDER_REVIEW (D-21). With
 # webhooks registered that can happen within one worker pass, so a step that reads the state right
@@ -66,6 +65,9 @@ class ScenarioRun:
         self.window: tuple[datetime, datetime] | None = None
         self.submitted_at = 0.0
         self.actors: dict[str, str] = {}
+        # confirm_fields steps collect here; the next disposition sends them (B-08).
+        self.confirmations: dict[str, dict[str, str]] = {}
+        self.history: list[dict] = []
 
     @property
     def system_id(self) -> str:
@@ -95,6 +97,14 @@ class ScenarioRun:
         resp = self.api.call("GET", f"/v1/events/{self.event_id}/audit", as_="viewer")
         assert resp.status_code == 200, resp.text
         return resp.json()
+
+    def listed_state(self) -> str:
+        """The event's state from the listing, which adds no audit entry (D-08)."""
+        page = self.api.call(
+            "GET", "/v1/events", as_="viewer", params={"system_id": self.system_id, "limit": 200}
+        )
+        assert page.status_code == 200, page.text
+        return next(e["state"] for e in page.json()["items"] if e["event_id"] == self.event_id)
 
     def run(self, phases: list[int]) -> list[str]:
         """Run the steps this target can; returns the deferred ones as "id (phase n)"."""
@@ -199,11 +209,66 @@ class ScenarioRun:
             assert resp.status_code == step.expect["status"], (call, resp.text)
             assert_error_body(resp)
         assert len(self.audit()) == len(before) + step.expect["audit_adds"]["count"]
-        page = self.api.call(
-            "GET", "/v1/events", as_="viewer", params={"system_id": self.system_id, "limit": 200}
-        )
-        state = next(e["state"] for e in page.json()["items"] if e["event_id"] == self.event_id)
+        state = self.listed_state()
         assert state_matches(step.expect["state"], state), state
+
+    def do_confirm_fields(self, step: Step) -> None:
+        """REQ-07: the reviewer's confirmations travel in the next disposition body; the
+        interface has no separate call for them (DispositionIn.harm_fields)."""
+        self.key(step.actor)
+        for status, names in (
+            ("CONFIRMED", step.args.get("confirmed", [])),
+            ("NOT_APPLICABLE", step.args.get("not_applicable", [])),
+        ):
+            self.confirmations.update({name: {"status": status} for name in names})
+
+    def do_disposition(self, step: Step) -> None:
+        """B-08/B-09: assign or revise a tier; a refused call changes nothing."""
+        key, want = self.key(step.actor), step.expect
+        body: dict = {"tier": step.args["tier"]}
+        if "rationale" in step.args:
+            body["rationale"] = step.args["rationale"]
+        if self.confirmations:
+            body["harm_fields"] = self.confirmations
+        state_before = self.listed_state()
+        audit_before = self.audit() if "ledger_records_attempt" in want else None
+        resp = self.api.call("POST", f"/v1/events/{self.event_id}/disposition", as_=key, json=body)
+        assert resp.status_code == want.get("status", 200), resp.text
+        if audit_before is not None:
+            new = self.audit()[len(audit_before) :]
+            assert len(new) == 1 and new[0]["actor_id"] == self.actor_id(key), new
+        if resp.status_code >= 400:
+            assert_error_body(resp)
+            assert self.listed_state() == state_before
+            return
+        self.confirmations = {}
+        event = resp.json()
+        history = event["revision_history"]
+        # B-09: earlier dispositions are kept as they were; this one is appended.
+        assert history[: len(self.history)] == self.history, history
+        assert len(history) == len(self.history) + 1, history
+        assert history[-1]["tier"] == body["tier"], history
+        assert history[-1]["reviewer_id"] == self.actor_id(key), history
+        assert history[-1]["previous_tier"] == (self.history[-1]["tier"] if self.history else None)
+        self.history = history
+        serious = body["tier"] != "NOT_SERIOUS"
+        assert event["state"] == want.get("state", "DISPOSITIONED" if serious else "CLOSED")
+        if "deadline_utc" in want:
+            if want["deadline_utc"] is not None:
+                pytest.fail("Article 73 deadline checks (B-10) arrive with issue #39")
+            assert event["deadline_utc"] is None, event["deadline_utc"]
+        if "dispositions" in want:
+            assert len(history) == want["dispositions"], history
+        if want.get("second_supersedes_first"):
+            assert history[1]["previous_tier"] == history[0]["tier"], history
+        if "escalations" in want and self.receiver.url is not None:
+            reminders = [
+                b
+                for b in self.receiver.bodies()
+                if b.get("notification_type") == "reminder"
+                and self.event_id in (b.get("event_id"), b.get("event", {}).get("event_id"))
+            ]
+            assert len(reminders) == want["escalations"], reminders
 
 
 HANDLED_ACTIONS = frozenset(

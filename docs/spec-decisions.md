@@ -28,6 +28,7 @@ final, because cross-team tests depend on them.
 | D-19 | Course testing interface: `/test/setup`, `/test/report` sessions, access, coverage | Interim (team) |
 | D-20 | REQ-07 prefill: which harm fields a breach prefills, and with what evidence | Decided (team, 2026-11-17); **pod** to confirm |
 | D-21 | What moves a breach from `FLAGGED` to `UNDER_REVIEW` | Decided (team, 2026-11-17); **pod** to confirm |
+| D-22 | Disposition details B-08/B-09 leave open (blank rationale, history, re-confirmation, Ex-2) | Interim (team, #38); **pod** to confirm |
 
 ## Agenda for the next pod meeting
 
@@ -428,6 +429,36 @@ webhook **first accepts** (any `2xx`) its `flag_notification`, the same moment a
 
 A harness reading the state right after a breach may see either `FLAGGED` or `UNDER_REVIEW`,
 because the worker can deliver within one pass; `tests/contract` accepts both there.
+
+## D-22: Disposition details (REQ-07, REQ-08a/b, REQ-09, B-08, B-09, Model 5 Ex-2)
+
+**Gaps.** B-08 and B-09 define the disposition rules but leave some behavior open, and Model 5
+Ex-2 disagrees with B-08.
+
+**Interim behavior (#38; pod to confirm):**
+
+- **Ex-2 vs B-08.** B-08 accepts a disposition only when all four harm fields are `CONFIRMED` or
+  `NOT_APPLICABLE`, including `NOT_SERIOUS`. Ex-2 assigns `NOT_SERIOUS` without confirming any
+  field, which B-08 refuses with `409`. We follow B-08 and added a `confirm-fields` step (all four
+  `NOT_APPLICABLE`) to Ex-2 in `fixtures.json`.
+- **Confirmations.** The interface has no separate call to confirm fields, so they are sent in
+  the disposition body (`harm_fields`). A refused call stores none of them. A later call may
+  confirm a field again: the row keeps the latest confirmation and the ledger keeps all of them.
+  The contract suite's `confirm_fields` step adds its confirmations to the next disposition call.
+- **Blank rationale.** A `NOT_SERIOUS` rationale that is empty or only whitespace is `400`. The
+  pod schema's `minLength: 1` would accept whitespace.
+- **History.** `revision_history` lists every disposition, oldest first, including the first
+  (`previous_tier = null`). The last entry is the current tier. Assigning the same tier again is
+  still a revision.
+- **Roles.** Only reviewer keys may dispose (B-13); admin keys get `403` like viewers. The role is
+  checked before the event id, so a viewer gets `403` even for an unknown event.
+- **Status codes.** `401`, then `400` (body), then `403` (role), `404` (event), `409` (pending
+  field or monitoring gap).
+- **Audit.** One `DISPOSITION` ledger entry per accepted call (B-14), with the tier, previous tier,
+  rationale, new state and the confirmations made in that call. Refused calls write nothing yet;
+  Ex-4 `viewer-tier` expects the refused attempt in the ledger, which is still open.
+- **Not in #38.** Deadlines and the rule for revising to a less strict tier (B-10, #39);
+  reminders (B-11, #40).
 
 ## Other notes
 

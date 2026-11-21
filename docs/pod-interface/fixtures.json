@@ -70,6 +70,8 @@
         {"id": "flagged", "phase": 3, "at": "PT0S", "actor": "viewer", "action": "get_event",
          "expect": {"type": "threshold_breach", "state": "FLAGGED", "metric_name": "psi",
                     "observed_value": 0.34, "threshold_value": "fixture", "detected_in_call": true}},
+        {"id": "confirm-fields", "phase": 4, "at": "PT1H", "actor": "reviewer", "action": "confirm_fields",
+         "args": {"confirmed": [], "not_applicable": ["health_safety", "critical_infrastructure", "fundamental_rights", "property_environment"]}},
         {"id": "blank-rationale", "phase": 4, "at": "PT1H", "actor": "reviewer", "action": "disposition",
          "args": {"tier": "NOT_SERIOUS", "rationale": ""},
          "expect": {"status": 400, "state_unchanged": true}},

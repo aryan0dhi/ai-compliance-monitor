@@ -13,13 +13,16 @@ from app.db.base import Base, check_in
 
 
 class LedgerEntryType(StrEnum):
-    """Model 2 ledger_entry.entry_type values. Phase 4 adds FIELD_CONFIRMED, DISPOSITION, ..."""
+    """Model 2 ledger_entry.entry_type values."""
 
     FLAGGED = "FLAGGED"  # threshold breach event created (REQ-03)
     VIEW = "VIEW"  # event record read through the API (REQ-14)
     GAP_OPENED = "GAP_OPENED"  # monitoring-gap event created (REQ-02)
     GAP_CLOSED = "GAP_CLOSED"  # data resumed for an open gap (REQ-02, Ex-3)
     NOTIFIED = "NOTIFIED"  # a notification reached a reviewer webhook (REQ-04)
+    # A reviewer's disposition or revision, with the harm fields it confirmed (REQ-08a/b, REQ-09).
+    # One entry per call (B-14), so field confirmations have no entry type of their own.
+    DISPOSITION = "DISPOSITION"
 
 
 class LedgerEntry(Base):
