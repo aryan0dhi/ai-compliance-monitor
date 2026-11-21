@@ -5,7 +5,8 @@ Each pass:
 2. snapshots the due deliveries and sends them OUTSIDE any transaction (a slow webhook must not
    hold the ledger lock);
 3. records each result in its own transaction. A success also appends a NOTIFIED ledger entry and,
-   for a monitoring gap, moves the event from GAP_OPEN to REVIEWER_NOTIFIED (Model 1).
+   on the first accepted flag notification, moves a monitoring gap from GAP_OPEN to
+   REVIEWER_NOTIFIED (Model 1, D-12) and a threshold breach from FLAGGED to UNDER_REVIEW (D-21).
 
 Delivery is at-least-once: if the worker stops between sending and recording, the request is
 sent again. Receivers deduplicate on `notification_id`.
@@ -34,6 +35,13 @@ logger = logging.getLogger(__name__)
 
 BATCH_SIZE = 100
 MAX_BACKOFF = timedelta(minutes=5)
+
+# The first accepted flag notification tells the reviewer about the event (D-12, D-21). Only these
+# (type, state) pairs move; any later state (closed gap, reviewed breach) is left alone.
+FIRST_DELIVERY_MOVES: dict[tuple[str, str], EventState] = {
+    (EventType.MONITORING_GAP, EventState.GAP_OPEN): EventState.REVIEWER_NOTIFIED,
+    (EventType.THRESHOLD_BREACH, EventState.FLAGGED): EventState.UNDER_REVIEW,
+}
 
 
 def retry_delay(attempts: int) -> timedelta:
@@ -173,11 +181,10 @@ def record_result(
         event = uow.events.get(notification.event_id)
         if (
             event is not None
-            and event.type == EventType.MONITORING_GAP
-            and event.state == EventState.GAP_OPEN
             and notification.notification_type == NotificationType.FLAG_NOTIFICATION
+            and (event.type, event.state) in FIRST_DELIVERY_MOVES
         ):
-            event.state = EventState.REVIEWER_NOTIFIED.value
+            event.state = FIRST_DELIVERY_MOVES[(event.type, event.state)].value
             payload["state"] = event.state
         ledger.append(
             uow.session,

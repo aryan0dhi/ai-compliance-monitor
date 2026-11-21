@@ -246,9 +246,9 @@ def test_ex2_runs_to_phase_5_without_a_report():
 
 
 def test_ex4_premature_report_is_refused():
-    """Ex-4 premature-report: 409 before any disposition. Its other expectations (state
-    UNDER_REVIEW, which needs #55, and a ledger entry for the refused attempt) are dropped here,
-    as for viewer-tier."""
+    """Ex-4 premature-report: 409 before any disposition. Its other expectations are dropped
+    here, as for viewer-tier: state UNDER_REVIEW (needs a webhook to accept the flag
+    notification, D-21) and a ledger entry for the refused attempt."""
     ex4 = FIXTURES.scenarios["Ex-4"]
     step = next(s for s in ex4.steps if s.id == "premature-report")
     runner, _ = run(

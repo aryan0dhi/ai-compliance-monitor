@@ -14,7 +14,13 @@ from pathlib import Path
 import pytest
 
 from tests.contract.cadence import cadence_violations
-from tests.contract.scenarios import ScenarioRun, assert_error_body, parse, sample_time
+from tests.contract.scenarios import (
+    ScenarioRun,
+    assert_error_body,
+    parse,
+    sample_time,
+    state_matches,
+)
 
 covers = pytest.mark.covers
 VERIFIER = Path(__file__).resolve().parents[2] / "scripts" / "verify_ledger_export.py"
@@ -182,7 +188,7 @@ def test_ac03_drift_breach_records_every_required_field(api, breach):
     assert event.status_code == 200, event.text
     e = event.json()
     assert e["event_id"] == event_id and e["system_id"] == body["system_id"]
-    assert (e["type"], e["state"]) == ("threshold_breach", "FLAGGED")
+    assert e["type"] == "threshold_breach" and state_matches("FLAGGED", e["state"])
     assert e["metric_name"] == body["metric_name"]
     assert parse(e["metric_timestamp"]) == parse(body["timestamp"])
     assert e["observed_value"] == pytest.approx(body["value"])
@@ -294,7 +300,9 @@ def test_ac06_ledger_verifies_and_an_edited_export_is_caught_offline(api, breach
 
 
 @covers(reqs=["REQ-04"], acs=["AC-04"], endpoints=["POST /v1/webhooks"])
-def test_ac04_breach_notification_reaches_the_webhook_within_15_minutes(api, receiver, breach):
+def test_ac04_breach_notification_reaches_the_webhook_within_15_minutes(
+    api, receiver, breach, meta_phases
+):
     if receiver.url is None:
         pytest.skip("CONTRACT_WEBHOOKS=off")
     event_id, _, flagged_at = breach
@@ -308,6 +316,18 @@ def test_ac04_breach_notification_reaches_the_webhook_within_15_minutes(api, rec
     body = api.wait_for(delivered, f"a webhook notification for {event_id}")
     assert time.monotonic() - flagged_at <= 15 * 60
     assert body.get("notification_type", "flag_notification") == "flag_notification"
+    if 4 in meta_phases:  # D-21: the accepted notification puts the breach under review
+
+        def listed_state() -> str:  # the listing, so polling adds no VIEW entries (D-08)
+            page = api.call(
+                "GET",
+                "/v1/events",
+                as_="viewer",
+                params={"system_id": api.target.system_id, "limit": 200},
+            )
+            return next(e["state"] for e in items(page.json()) if e["event_id"] == event_id)
+
+        api.wait_for(lambda: listed_state() == "UNDER_REVIEW", "state UNDER_REVIEW")
 
 
 # --- REQ-02: monitoring gaps (needs the test clock) ----------------------------------------------
