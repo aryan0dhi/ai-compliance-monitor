@@ -30,6 +30,7 @@ final, because cross-team tests depend on them.
 | D-22 | Disposition details B-08/B-09 leave open (blank rationale, history, re-confirmation, Ex-2) | Interim (team, #38); **pod** to confirm |
 | D-23 | Deadline details B-10 leaves open (which tier is stricter, A after NOT_SERIOUS, same tier) | Interim (team, #39); **pod** to confirm |
 | D-24 | Reminder details B-11 leaves open (catch-up, revisions, closing, payload) | Interim (team, #40); **pod** to confirm |
+| D-25 | Report details B-12 leaves open (revision after assembly, submission, audit) | Interim (team, #41); **pod** to confirm |
 
 ## Agenda for the next pod meeting
 
@@ -484,6 +485,41 @@ the event closes, or when several checkpoints pass at once.
   `reminder: {elapsed_percent, deadline_utc}` (pod `WebhookDelivery`), and `event` is the event
   snapshot with `deadline_utc`. A delivered reminder adds a `NOTIFIED` ledger entry; queuing it
   adds none, because it doesn't change the event.
+
+## D-25: Report details (REQ-08a, REQ-12, REQ-13, B-12, AC-13)
+
+**Gaps.** B-12 says the report is `409` until a serious tier is assigned and that repeated calls
+return the same document. It doesn't say what a revision after assembly does, what
+`markReportSubmitted` (**Proposed**) checks, or what goes in the audit trail. The contract marks
+both endpoints Phase 5; they are implemented now because they follow from #38.
+
+**Interim behavior (#41; pod to confirm):**
+
+- **When.** A report exists while the event's *current* (latest) disposition is a serious tier.
+  Before any disposition, after `NOT_SERIOUS` (including a revision to it), and for monitoring
+  gaps (INV-12) both endpoints are `409`.
+- **Assembly.** The first `GET` for the current determination assembles the report: the event as
+  it stands (state, harm fields, `revision_history`), the four harm fields, the determination
+  (tier, reviewer, rationale of the latest disposition), `detected_at`, `determination_at` (that
+  disposition's `recorded_at`), `assembled_at` (service clock) and `deadline_utc`. The JSON text
+  is stored and every later call returns it byte for byte, followed by `report_sha256` (sha256 of
+  the stored text) and `submitted_at`.
+- **Revision after assembly.** The report belongs to the determination it was assembled from. A
+  revision gets its own report on its next request, with a new `assembled_at` and hash; the
+  earlier report is kept (insert-only, `report` table) but no longer served. Neither D-03 state
+  (`REPORT_READY`, `SUBMITTED`) is visible: the event stays `DISPOSITIONED`.
+- **Submission.** Reviewer keys only; optional `note` (at most 2000 characters, else `400`).
+  The current report must already be assembled (`GET` first) and not yet marked, else `409`. It
+  sets `submitted_at` once and returns the report; the stored document itself doesn't change. A
+  revision's new report starts unsubmitted.
+- **Roles.** Reviewer keys only (B-13); viewers, admins and system keys get `403`, checked before
+  the event id.
+- **Audit (B-14).** One ledger entry per successful call: `REPORT_ASSEMBLED` (with the hash) for
+  the call that assembles, `VIEW` for each later read, `REPORT_SUBMITTED` (with the note) for the
+  submission. Refused calls write nothing, which leaves Ex-4 `premature-report`'s
+  `ledger_records_attempt` open, like `viewer-tier` (D-22).
+- **Concurrency.** The event row is locked while a report is read or changed, as for
+  dispositions, so concurrent first requests assemble one report.
 
 ## Other notes
 
