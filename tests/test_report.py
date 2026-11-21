@@ -294,7 +294,7 @@ class TestRefusals:
             report(uow, ledger, clock, disposed, system_principal(SYSTEM))
 
     def test_ledger_failure_stores_nothing(self, uow, ledger, clock, disposed, reviewer):
-        ledger.fail_with = UnimplementedError("ledger down")
+        ledger.fail_with = UnimplementedError("x", "REQ-06", "ledger")
         with pytest.raises(UnimplementedError):
             report(uow, ledger, clock, disposed, reviewer)
         assert uow.reports.rows == {}
