@@ -19,6 +19,16 @@ DEFERRED_ACTIONS = frozenset(
     {"confirm_fields", "disposition", "await_reminders", "get_report", "await_gap"}
     | {"tamper_export", "await_alert"}
 )
+# A breach is FLAGGED until a webhook accepts its flag notification, then UNDER_REVIEW (D-21). With
+# webhooks registered that can happen within one worker pass, so a step that reads the state right
+# after the breach accepts either.
+SAME_AS = {"FLAGGED": ("FLAGGED", "UNDER_REVIEW")}
+
+
+def state_matches(want: str, got: str) -> bool:
+    return got in SAME_AS.get(want, (want,))
+
+
 # detected_at may differ from the service clock reads around the request by this much.
 CLOCK_TOLERANCE = timedelta(seconds=1)
 
@@ -124,9 +134,11 @@ class ScenarioRun:
         resp = self.api.call("GET", f"/v1/events/{self.event_id}", as_=key)
         assert resp.status_code == want.get("status", 200), resp.text
         event = resp.json()
-        for field in ("type", "state", "metric_name"):
+        for field in ("type", "metric_name"):
             if field in want:
                 assert event[field] == want[field], (field, event[field])
+        if "state" in want:
+            assert state_matches(want["state"], event["state"]), event["state"]
         if "observed_value" in want:
             assert event["observed_value"] == pytest.approx(want["observed_value"])
         if want.get("threshold_value") == "fixture":
@@ -191,7 +203,7 @@ class ScenarioRun:
             "GET", "/v1/events", as_="viewer", params={"system_id": self.system_id, "limit": 200}
         )
         state = next(e["state"] for e in page.json()["items"] if e["event_id"] == self.event_id)
-        assert state == step.expect["state"], state
+        assert state_matches(step.expect["state"], state), state
 
 
 HANDLED_ACTIONS = frozenset(

@@ -577,7 +577,8 @@ components:
       type: string
       description: |
         Breach events: `FLAGGED` → `UNDER_REVIEW` → `DISPOSITIONED` (serious tier) or `CLOSED`
-        (not serious). Gap events (**Proposed**, D-12): `GAP_OPEN` → `REVIEWER_NOTIFIED` →
+        (not serious). `UNDER_REVIEW` is set when a webhook first accepts the breach's
+        `flag_notification` (**Proposed**, D-21). Gap events (**Proposed**, D-12): `GAP_OPEN` → `REVIEWER_NOTIFIED` →
         `GAP_CLOSED`; a gap never takes a breach state (INV-12).
       enum: [FLAGGED, UNDER_REVIEW, DISPOSITIONED, CLOSED, GAP_OPEN, REVIEWER_NOTIFIED, GAP_CLOSED]
 
