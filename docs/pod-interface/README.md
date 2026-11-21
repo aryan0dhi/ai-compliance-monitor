@@ -85,7 +85,9 @@ deployment provides.
   delay of `detected_at`. The default delay is 15 minutes of service-clock time. In a test
   deployment that is not advancing its clock, the delivery MUST also arrive within the settle
   time (B-21). Non-`2xx` responses are retried. Delivery is at least once; `notification_id`
-  identifies duplicates.
+  identifies duplicates. When a webhook first accepts a breach's `flag_notification`, the breach
+  moves `FLAGGED` → `UNDER_REVIEW` (Phase 4; **Proposed**, D-21). With no webhook it stays
+  `FLAGGED`.
 - **B-05 Retention, storage (REQ-05).** `retain_until` ≥ `detected_at` + 6 calendar months. An
   event stays retrievable until then, including after the test clock is advanced past 5 months
   29 days (AC-05).
@@ -217,6 +219,7 @@ Each team adds its deployment to the pod registry with:
 | D-09 | One event per breaching sample (vs per episode) | Event and notification counts in AC-03/04/16 |
 | D-11 | Gap at exactly `k × interval` (inclusive) | AC-02 boundary |
 | D-12 | Gap states `GAP_OPEN`/`REVIEWER_NOTIFIED`/`GAP_CLOSED` | State assertions on gaps |
+| D-21 | Breach goes `UNDER_REVIEW` when its flag notification is first accepted | Ex-1/Ex-4 state assertions |
 | D-13 | Admin-only webhooks and test routes | Which key a harness uses |
 | D-14 | Common ledger hash rule (B-06) | Independent re-verification (Q4.3) |
 | D-16 | Standard fixtures and scenarios file (B-20, B-24) | Every test's inputs |
