@@ -112,6 +112,7 @@ scripts/                start-api.sh; verify_ledger_export.py (standalone ledger
 | `metrics` | REQ-01 metric ingestion, `POST /v1/metrics` |
 | `thresholds` | REQ-03 threshold config and breach detection |
 | `events` | REQ-03 event creation, REQ-05 storage, `GET /v1/events` (Phase 4 review: TBD) |
+| `review` | REQ-07 harm fields, REQ-08–10 dispositions and deadlines, REQ-11 reminders, REQ-12 reports (`/v1/events/{id}/report`) |
 | `auth` | REQ-13 API keys (hashed) and roles |
 | `ledger` | REQ-06/14 hash-chained audit ledger, `/v1/ledger/*`, `/v1/events/{id}/audit` (REQ-16: Phase 5) |
 | `notifications` | REQ-04 outbox, `POST /v1/webhooks`, delivery (REQ-11 reminders: Phase 4) |

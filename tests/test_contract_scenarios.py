@@ -225,3 +225,42 @@ def test_ex4_refused_attempt_is_not_yet_audited():
     step = next(s for s in ex4.steps if s.id == "viewer-tier")
     with pytest.raises(AssertionError, match="viewer-tier"):
         run(dataclasses.replace(ex4, steps=(step,)))
+
+
+def test_ex1_report_of_the_revised_determination():
+    """Model 5 Ex-1 report at d10 13:00 (B-12, AC-13): the handler checks the DEATH
+    determination, the three times and that a second call returns the same document."""
+    runner, deferred = run(
+        ex1_steps("breach", "confirm-fields", "assign-other-serious", "revise-to-death", "report"),
+        phases=(3, 4, 5),
+    )
+    assert deferred == []
+    assert [r.disposition_seq for r in runner.api.uow.reports.rows.values()] == [2]
+
+
+def test_ex2_runs_to_phase_5_without_a_report():
+    """Model 5 Ex-2 no-report: the NOT_SERIOUS event's report is 409."""
+    runner, deferred = run(FIXTURES.scenarios["Ex-2"], phases=(3, 4, 5))
+    assert deferred == []
+    assert runner.api.uow.reports.rows == {}
+
+
+def test_ex4_premature_report_is_refused():
+    """Ex-4 premature-report: 409 before any disposition. Its other expectations are dropped
+    here, as for viewer-tier: state UNDER_REVIEW (needs a webhook to accept the flag
+    notification, D-21) and a ledger entry for the refused attempt."""
+    ex4 = FIXTURES.scenarios["Ex-4"]
+    step = next(s for s in ex4.steps if s.id == "premature-report")
+    runner, _ = run(
+        dataclasses.replace(ex4, steps=(dataclasses.replace(step, expect={"status": 409}),))
+    )
+    assert runner.api.uow.reports.rows == {}
+
+
+def test_a_wrong_report_tier_fails_the_step():
+    """The report handler compares the determination with the latest disposition."""
+    runner, _ = run(ex1_steps("breach", "confirm-fields", "assign-other-serious"))
+    runner.history[-1] = {**runner.history[-1], "tier": "DEATH"}
+    report = next(s for s in FIXTURES.scenarios["Ex-1"].steps if s.id == "report")
+    with pytest.raises(AssertionError):
+        runner.do_get_report(report)

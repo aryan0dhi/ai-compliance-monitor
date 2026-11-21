@@ -473,6 +473,81 @@ class TestDispositionConstraints:
         assert violates(conn, "DELETE FROM event WHERE id = :e", {"e": event_id})
 
 
+class TestReportConstraints:
+    """Migration 0009 (B-12, D-25): one stored report per disposition, submitted at most once."""
+
+    SHA = "a" * 64
+
+    @pytest.fixture
+    def reviewer(self, conn):
+        return insert_user(conn, role="reviewer")
+
+    @pytest.fixture
+    def event_id(self, conn, reviewer):
+        event_id = uuid.uuid4()
+        assert insert_event(conn, id=event_id)
+        conn.execute(
+            text(
+                "INSERT INTO disposition (event_id, seq, tier, previous_tier, reviewer_id,"
+                " rationale, recorded_at, deadline_utc) VALUES (:e, 1, 'DEATH', NULL, :r, NULL,"
+                " :t, :d)"
+            ),
+            {"e": event_id, "r": reviewer, "t": T0, "d": T0 + timedelta(days=10)},
+        )
+        return event_id
+
+    def report(self, conn, event, reviewer, **values) -> bool:
+        row = {
+            "event_id": event,
+            "disposition_seq": 1,
+            "document": "{}",
+            "report_sha256": self.SHA,
+            "assembled_at": T0,
+            "assembled_by": reviewer,
+            "submitted_at": None,
+            "submitted_by": None,
+            "submission_note": None,
+            **values,
+        }
+        cols = ", ".join(row)
+        params = ", ".join(f":{k}" for k in row)
+        return not violates(conn, f"INSERT INTO report ({cols}) VALUES ({params})", row)
+
+    def test_assembled_and_submitted_reports_accepted(self, conn, event_id, reviewer):
+        assert self.report(conn, event_id, reviewer)
+        conn.execute(
+            text(
+                "UPDATE report SET submitted_at = :t, submitted_by = :r, submission_note = 'sent'"
+                " WHERE event_id = :e"
+            ),
+            {"t": T0, "r": reviewer, "e": event_id},
+        )
+
+    def test_one_report_per_disposition(self, conn, event_id, reviewer):
+        assert self.report(conn, event_id, reviewer)
+        assert not self.report(conn, event_id, reviewer, report_sha256="b" * 64)
+
+    @pytest.mark.parametrize(
+        "values",
+        [
+            {"disposition_seq": 2},  # no such disposition
+            {"report_sha256": "A" * 64},
+            {"report_sha256": "a" * 63},
+            {"document": None},
+            {"assembled_at": None},
+            {"assembled_by": uuid.uuid4()},  # no such user
+            {"submitted_at": T0},  # without the reviewer who submitted
+            {"submission_note": "sent"},  # a note only comes with a submission
+        ],
+    )
+    def test_invalid_rows_rejected(self, conn, event_id, reviewer, values):
+        assert not self.report(conn, event_id, reviewer, **values)
+
+    def test_reported_disposition_cannot_be_deleted(self, conn, event_id, reviewer):
+        assert self.report(conn, event_id, reviewer)
+        assert violates(conn, "DELETE FROM disposition WHERE event_id = :e", {"e": event_id})
+
+
 def test_timestamps_round_trip_as_utc(conn):
     value = conn.execute(
         text("SELECT sampled_at FROM metric_sample WHERE system_id = :s"), {"s": SYS}
@@ -591,8 +666,9 @@ class TestLedgerConstraints:
     def test_checks(self, conn, seq, prev, entry_type):
         assert not insert_ledger(conn, seq, prev, entry_type=entry_type)
 
-    def test_disposition_entries_accepted(self, conn):
-        assert insert_ledger(conn, 1, "0" * 64, entry_type="DISPOSITION")
+    @pytest.mark.parametrize("entry_type", ["DISPOSITION", "REPORT_ASSEMBLED", "REPORT_SUBMITTED"])
+    def test_review_entries_accepted(self, conn, entry_type):
+        assert insert_ledger(conn, 1, "0" * 64, entry_type=entry_type)
 
     def test_audited_event_cannot_be_deleted(self, conn):
         event_id = uuid.uuid4()

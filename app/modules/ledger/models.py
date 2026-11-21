@@ -23,6 +23,11 @@ class LedgerEntryType(StrEnum):
     # A reviewer's disposition or revision, with the harm fields it confirmed (REQ-08a/b, REQ-09).
     # One entry per call (B-14), so field confirmations have no entry type of their own.
     DISPOSITION = "DISPOSITION"
+    # The Article 73 report of the current determination was assembled and stored (REQ-12, B-12).
+    # Later reads of the same report are VIEW entries.
+    REPORT_ASSEMBLED = "REPORT_ASSEMBLED"
+    # A reviewer recorded that the report went to the authority (REQ-12, markReportSubmitted).
+    REPORT_SUBMITTED = "REPORT_SUBMITTED"
 
 
 class LedgerEntry(Base):

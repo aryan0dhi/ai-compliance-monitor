@@ -144,7 +144,7 @@ def _app():
             return system_principal(SYSTEM_ID)
         if path == "/v1/webhooks" or path.startswith("/v1/test/"):
             return user_principal(Role.ADMIN)
-        if path.endswith("/disposition"):
+        if path.endswith("/disposition") or "/report" in path:
             return user_principal(Role.REVIEWER)
         return user_principal(Role.VIEWER)
 
@@ -165,7 +165,9 @@ def _app():
 
 _loaded = schemathesis.openapi.from_dict(SPEC)
 _loaded.app = _app()
-pod_schema = _loaded.exclude(path_regex="/report|^/v1/test/reset$")
+# markReportSubmitted is Proposed and the pod document lists no 400 for it, though a note over
+# 2000 characters is one (B-22 still applies); tests/test_fuzz.py covers it against our schema.
+pod_schema = _loaded.exclude(path_regex="/report/submission$|^/v1/test/reset$")
 
 
 @pod_schema.auth()

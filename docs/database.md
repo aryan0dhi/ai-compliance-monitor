@@ -26,6 +26,7 @@ erDiagram
     metric_sample ||--o| event : "triggers (breach only)"
     event ||--o{ harm_field : "Art. 3(49) fields (breach only)"
     event ||--o{ disposition : "tiers, oldest first (breach only)"
+    disposition ||--o| report : "Article 73 report of a serious tier"
 
     monitored_system {
         uuid id PK
@@ -89,6 +90,17 @@ erDiagram
         text rationale "required for NOT_SERIOUS"
         timestamptz recorded_at
         timestamptz deadline_utc "null only for NOT_SERIOUS"
+    }
+    report {
+        uuid event_id PK,FK
+        int disposition_seq PK,FK "the disposition reported on"
+        text document "JSON text served by GET .../report, never rewritten"
+        text report_sha256 "sha256 of document"
+        timestamptz assembled_at
+        uuid assembled_by FK
+        timestamptz submitted_at "nullable, set once"
+        uuid submitted_by FK "nullable, with submitted_at"
+        text submission_note "nullable"
     }
 ```
 
@@ -192,6 +204,20 @@ Every tier a reviewer assigns to a breach event (B-08, B-09). Primary key `(even
   `recorded_at` of the event's first serious-tier row. `ck_disposition_deadline_matches_tier`
   requires a deadline for every serious tier and none for `NOT_SERIOUS`. Migration 0007
   backfilled earlier rows by replaying each event's dispositions.
+
+### `report` (module `review`, REQ-12)
+The Article 73 report of one serious-tier disposition (B-12, D-25). Primary key
+`(event_id, disposition_seq)`, a RESTRICT foreign key to `disposition`, so a reported
+determination can't be deleted.
+- Inserted by the first `GET /v1/events/{id}/report` after that disposition; `document` is the
+  exact JSON text every later call returns, and `report_sha256` its sha256
+  (`ck_report_report_sha256_hex`). Nothing rewrites it: a revision gets a new row on its next
+  request.
+- `submitted_at` and `submitted_by` are set together, once, by
+  `POST /v1/events/{id}/report/submission` (`ck_report_submitted_by_matches_at`); a
+  `submission_note` needs a submission (`ck_report_note_needs_submission`).
+- Each assembly and submission writes one `REPORT_ASSEMBLED` / `REPORT_SUBMITTED` ledger entry in
+  the same transaction (migration 0009 adds both types).
 
 ### `app_user`, `api_key` (module `auth`, REQ-13)
 - `app_user.id` is the `actor_id` written to the ledger. `role` is `system | viewer | reviewer |
