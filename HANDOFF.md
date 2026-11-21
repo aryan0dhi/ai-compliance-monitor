@@ -1,6 +1,6 @@
 # Handoff: metrics, thresholds and event storage (REQ-01, REQ-03, REQ-05 storage)
 
-**Owner:** Aryan · **Branch:** `feature/metrics-database` · **Last updated:** 2026-10-17
+**Owner:** Aryan · **Branch:** `main` · **Last updated:** 2026-11-21
 
 This is for the developers building authentication, audit logging, notifications, monitoring-gap
 detection, the background worker and the test routes. It covers what exists, how to plug in, and
@@ -16,9 +16,13 @@ what is still open. The Phase 2 submission is the source of truth; where it is a
 | REQ-03 threshold configuration | Service function only (`add_threshold_version`); no endpoint (D-07) |
 | `GET /v1/events`, `GET /v1/events/{id}` | Implemented, unit + contract tested |
 | REQ-05 storage (`retain_until`, constraint, RESTRICT FKs) | Implemented. **Retention enforcement/purge is Phase 5 and not implemented** |
-| Real-PostgreSQL integration tests | **114 pass** on PostgreSQL 16 (2026-10-18), plus Schemathesis on PostgreSQL with the real auth, ledger and notifier |
+| Real-PostgreSQL integration tests | Run in CI on PostgreSQL 16 (`REQUIRE_POSTGRES=1`), plus Schemathesis on PostgreSQL with the real auth, ledger and notifier |
 | Pod decisions D-01, D-03 to D-16 | Interim behavior implemented; agreement pending (backlog §10.2, spec-decisions D-11 to D-16) |
 | REQ-13 auth (API keys, roles), REQ-06/14 ledger, REQ-04 notifications, REQ-02 gaps, test routes, worker | **Implemented 2026-10-18** (§4 describes how; [docs/cross-team-testing.md](docs/cross-team-testing.md) for podmates) |
+| Phase 4 review (`app/modules/review`): REQ-07 harm fields, `UNDER_REVIEW` on notification, REQ-08a/b/09 dispositions, REQ-10/15 deadlines, REQ-11 reminders | **Implemented 2026-11-21**: #37, #50, #38, #39, #40; D-20 to D-24. `/v1/meta` still lists phase 3 only: Ex-4's refused attempts aren't ledgered yet |
+| REQ-12 Article 73 report and submission (Phase 5 endpoints) | **Implemented 2026-11-21**: #41, D-25 |
+| Cross-team deployment | GCP VM at <https://34-57-175-31.sslip.io> (tester at `/tester`); `GET /v1/meta` `build` is the deployed commit (#45). Runs with podmates: #43 |
+| Test suite | 926 pass on PostgreSQL 16 in CI (96 % line coverage); contract suite 43/43 against the live stack |
 
 What a caller sees today: a valid key is required (`401` otherwise; issue keys with
 `python -m app.cli`). A breach stores the event, its `FLAGGED` ledger entry and an outbox row in
@@ -237,8 +241,9 @@ volume), **D-10** (gap semantics for odd timestamps).
 
 ## 9. Security: what has and hasn't been verified
 
-HawkScan (DAST) was skipped: there is no running deployment, no `HAWK_API_KEY`, and auth isn't
-implemented, so a scan would only see `401`s.
+HawkScan (DAST) hasn't been run yet. Auth is implemented, and the GCP test deployment
+(<https://34-57-175-31.sslip.io>) can be scanned with a test key. A `HAWK_API_KEY` is still
+needed.
 
 **Done (2026-10-16/17):**
 - bandit (SAST) on `app/`: 0 issues after replacing one `assert` with an explicit check.
@@ -264,22 +269,30 @@ addresses refused, address pinned, no redirects, no proxies) with a real-socket 
 tamper detection by direct SQL edit/delete (AC-06, Ex-5); bandit clean; pip-audit clean on both
 lockfiles; Schemathesis 1,000 requests per endpoint on fakes and PostgreSQL.
 
-**Still unverified (needs a running deployment and/or Docker):**
+**Covered since by CI and the GCP deployment (2026-11):**
+- **TLS and security headers.** Caddy terminates TLS with an automatically renewed certificate
+  and sets `Strict-Transport-Security`, `X-Content-Type-Options: nosniff` and
+  `Referrer-Policy: no-referrer`, and strips `Server` (`deploy/gcp/Caddyfile`). Only 80/443 are
+  open, and the database is never published.
+- **Container OS packages.** Trivy scans the image in CI and fails on fixable HIGH/CRITICAL
+  findings; the Dockerfile applies Debian security updates. OSV-Scanner, CodeQL and gitleaks also
+  run on every push.
+
+**Still unverified:**
 
 | Check | Why it's open | Owner |
 |---|---|---|
 | Brute force / rate limiting on API keys | Keys are 256-bit random (brute force infeasible) and stored hashed; no rate limit yet | team |
-| SQL injection and other DAST checks (HawkScan) | No running app plus `HAWK_API_KEY` | team |
-| Security headers (HSTS, `X-Content-Type-Options`, ...) and TLS on Lightsail | Not configured; deployment not set up | deployment |
+| SQL injection and other DAST checks (HawkScan) | Deployment exists; needs `HAWK_API_KEY` and a scan run | team |
+| Content-Security-Policy / frame options for `/docs` | Caddy sets HSTS, nosniff and Referrer-Policy only | deployment |
 | Request body size limits and rate limiting on `POST /v1/metrics` | None configured | team |
 | CORS policy for the reviewer web UI | Not configured (browsers block cross-origin by default) | UI owner |
 | `/docs` and `/openapi.json` exposed in production | Decide whether to disable when `APP_ENV=production` | team |
 | Webhook secrets stored in clear (needed for HMAC signing) | Encrypt at rest with REQ-16's key handling | Phase 5 |
-| Container image OS (Debian) packages | pip-audit only covers Python packages; run an image scanner (e.g. `docker scout cves`) | team |
+| Branch protection on `main` | Needs a repo admin (#44) | owner |
 
-To run HawkScan later: start the stack (`docker compose up`), set `HAWK_API_KEY`, configure
-`stackhawk.yml` with the base URL and a test API key once auth exists, then run the
-`hawkscan` loop.
+To run HawkScan: set `HAWK_API_KEY`, configure `stackhawk.yml` with the deployed base URL (or a
+local `docker compose up`) and a test API key from `issue-keys.sh`, then run the `hawkscan` loop.
 
 ## 10. Backlog for this area
 
