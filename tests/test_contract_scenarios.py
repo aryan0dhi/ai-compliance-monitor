@@ -207,24 +207,33 @@ def test_a_wrong_deadline_fails_the_step():
         run(dataclasses.replace(ex1, steps=steps))
 
 
-def test_ex4_viewer_tier_is_refused():
-    """Ex-4 viewer-tier: 403, state unchanged. Its audit expectation (a ledger entry for the
-    refused attempt) is not implemented yet, so it's dropped here."""
+def ledger_types(runner) -> list[str]:
+    return [e.entry_type for e in runner.api.uow.ledger.for_event(UUID(runner.event_id))]
+
+
+def test_ex4_viewer_tier_is_refused_and_audited():
+    """Ex-4 viewer-tier as written: 403, state unchanged, and one audit entry for the attempt,
+    attributed to the viewer (D-26)."""
     ex4 = FIXTURES.scenarios["Ex-4"]
     step = next(s for s in ex4.steps if s.id == "viewer-tier")
-    step = dataclasses.replace(
-        step, expect={k: v for k, v in step.expect.items() if k != "ledger_records_attempt"}
-    )
     runner, _ = run(dataclasses.replace(ex4, steps=(step,)))
     assert runner.history == [] and runner.listed_state() == "FLAGGED"
+    assert ledger_types(runner)[-1] == "REFUSED"
 
 
-def test_ex4_refused_attempt_is_not_yet_audited():
-    """Documents the open gap: B-14/Ex-4 want refused attempts in the audit trail."""
+def test_ex4_runs_up_to_phase_4():
+    """Model 5 Ex-4 up to phase 4, except premature-report's UNDER_REVIEW: that needs a webhook
+    to accept the flag notification (D-21), and this in-process run has none."""
     ex4 = FIXTURES.scenarios["Ex-4"]
-    step = next(s for s in ex4.steps if s.id == "viewer-tier")
-    with pytest.raises(AssertionError, match="viewer-tier"):
-        run(dataclasses.replace(ex4, steps=(step,)))
+    steps = tuple(
+        dataclasses.replace(s, expect={k: v for k, v in s.expect.items() if k != "state"})
+        if s.id == "premature-report"
+        else s
+        for s in ex4.steps
+    )
+    runner, deferred = run(dataclasses.replace(ex4, steps=steps))
+    assert deferred == []
+    assert ledger_types(runner).count("REFUSED") == 2
 
 
 def test_ex1_report_of_the_revised_determination():
@@ -245,16 +254,15 @@ def test_ex2_runs_to_phase_5_without_a_report():
     assert runner.api.uow.reports.rows == {}
 
 
-def test_ex4_premature_report_is_refused():
-    """Ex-4 premature-report: 409 before any disposition. Its other expectations are dropped
-    here, as for viewer-tier: state UNDER_REVIEW (needs a webhook to accept the flag
-    notification, D-21) and a ledger entry for the refused attempt."""
+def test_ex4_premature_report_is_refused_and_audited():
+    """Ex-4 premature-report: 409 before any disposition, with the attempt in the audit trail.
+    Its UNDER_REVIEW expectation is dropped (no webhook here, D-21)."""
     ex4 = FIXTURES.scenarios["Ex-4"]
     step = next(s for s in ex4.steps if s.id == "premature-report")
-    runner, _ = run(
-        dataclasses.replace(ex4, steps=(dataclasses.replace(step, expect={"status": 409}),))
-    )
+    expect = {k: v for k, v in step.expect.items() if k != "state"}
+    runner, _ = run(dataclasses.replace(ex4, steps=(dataclasses.replace(step, expect=expect),)))
     assert runner.api.uow.reports.rows == {}
+    assert ledger_types(runner)[-1] == "REFUSED"
 
 
 def test_a_wrong_report_tier_fails_the_step():

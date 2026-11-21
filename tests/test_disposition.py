@@ -97,6 +97,17 @@ def dispose(uow, ledger, clock, event_id, principal, tier, *, rationale=None, fi
     )
 
 
+def assert_refusal_recorded(ledger, event_id, principal, status_code) -> None:
+    """D-26: one REFUSED entry for the attempt (written after the rollback); then clears it."""
+    (call,) = ledger.calls
+    assert call["entry_type"] == LedgerEntryType.REFUSED
+    assert (call["event_id"], call["actor_id"]) == (event_id, principal.actor_id)
+    assert call["payload"]["operation"] == "recordDisposition"
+    assert call["payload"]["status"] == status_code
+    assert call["payload"]["role"] == principal.role.value
+    ledger.calls.clear()
+
+
 def assert_unchanged(uow, ledger, event_id) -> None:
     """Nothing was written: still FLAGGED, fields PENDING, no disposition, no ledger entry."""
     assert uow.events.get(event_id).state == EventState.FLAGGED
@@ -491,6 +502,7 @@ class TestHttp:
         resp = http.post(event_id, {"tier": "DEATH", "harm_fields": ALL_NA})
         assert resp.status_code == 403
         assert isinstance(resp.json()["detail"], str)
+        assert_refusal_recorded(ledger, event_id, http.principal, 403)
         assert_unchanged(uow, ledger, event_id)
 
     @pytest.mark.parametrize("event", ["unknown", "not-a-uuid"])
@@ -511,7 +523,19 @@ class TestHttp:
         resp = http.post(event_id, {"tier": "DEATH"})
         assert resp.status_code == 409
         assert "pending" in resp.json()["detail"]
+        assert_refusal_recorded(ledger, event_id, http.principal, 409)
         assert_unchanged(uow, ledger, event_id)
+
+    def test_refusals_of_unknown_events_are_not_recorded(self, http, ledger):
+        http.principal = user_principal(Role.VIEWER)
+        assert http.post(uuid4(), {"tier": "DEATH"}).status_code == 403
+        assert http.post("not-a-uuid", {"tier": "DEATH"}).status_code == 403
+        assert ledger.calls == []
+
+    def test_a_failed_refusal_record_still_returns_the_refusal(self, http, ledger, event_id):
+        """D-26: recording is best effort; the caller still gets its 409."""
+        ledger.fail_with = RuntimeError("ledger down")
+        assert http.post(event_id, {"tier": "DEATH"}).status_code == 409
 
     def test_gap_is_409(self, http, uow):
         uow.seed_system(SYSTEM)

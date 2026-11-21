@@ -666,7 +666,9 @@ class TestLedgerConstraints:
     def test_checks(self, conn, seq, prev, entry_type):
         assert not insert_ledger(conn, seq, prev, entry_type=entry_type)
 
-    @pytest.mark.parametrize("entry_type", ["DISPOSITION", "REPORT_ASSEMBLED", "REPORT_SUBMITTED"])
+    @pytest.mark.parametrize(
+        "entry_type", ["DISPOSITION", "REPORT_ASSEMBLED", "REPORT_SUBMITTED", "REFUSED"]
+    )
     def test_review_entries_accepted(self, conn, entry_type):
         assert insert_ledger(conn, 1, "0" * 64, entry_type=entry_type)
 
