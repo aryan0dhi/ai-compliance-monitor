@@ -33,7 +33,8 @@ fi
 sudo chmod 600 "$ENV_FILE"
 
 cd "$APP/deploy/gcp"
-sudo docker compose up -d --build --remove-orphans
+# GIT_SHA (from deploy.sh) is baked into the images and shown on GET /v1/meta (#45).
+sudo env GIT_SHA="${GIT_SHA:-unknown}" docker compose up -d --build --remove-orphans
 
 for attempt in $(seq 1 60); do
     if sudo docker compose exec -T api python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')" 2>/dev/null; then

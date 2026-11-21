@@ -98,7 +98,8 @@ def test_every_phase3_operation_is_implemented():
     assert missing == []
 
 
-def test_meta_and_me():
+def test_meta_and_me(monkeypatch):
+    monkeypatch.delenv("GIT_SHA", raising=False)  # set inside the docker images
     app = create_app(Settings(enable_test_routes=True, app_env=AppEnv.TEST))
     viewer = user_principal(Role.VIEWER)
     app.dependency_overrides[get_principal] = lambda: viewer
@@ -107,12 +108,26 @@ def test_meta_and_me():
         "interface_version": INTERFACE_VERSION,
         "phases": [3],
         "test_routes": True,
+        "build": "unknown",
     }
     assert client.get("/v1/me").json() == {
         "actor_id": str(viewer.actor_id),
         "role": "viewer",
         "system_id": None,
     }
+
+
+def test_meta_reports_the_build_sha(monkeypatch):
+    """#45: the GIT_SHA the image was built with (Dockerfile ENV) is shown as build."""
+    monkeypatch.setenv("GIT_SHA", "0123456789abcdef0123456789abcdef01234567")
+    app = create_app(Settings(app_env=AppEnv.TEST))
+    meta = TestClient(app).get("/v1/meta").json()
+    assert meta["build"] == "0123456789abcdef0123456789abcdef01234567"
+
+
+def test_build_is_optional_in_the_pod_meta_schema():
+    meta = SPEC["components"]["schemas"]["Meta"]
+    assert "build" in meta["properties"] and "build" not in meta["required"]
 
 
 def test_meta_needs_no_key_and_reports_production():

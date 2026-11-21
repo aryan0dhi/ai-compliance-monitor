@@ -347,7 +347,22 @@ jobs:
 
       - name: Start stack
         if: steps.detect.outputs.run == 'true'
+        env:
+          GIT_SHA: ${{ github.sha }}
         run: docker compose up --build --detach --wait --wait-timeout 300
+
+      # #45: the image reports the commit it was built from.
+      - name: Check the build SHA on /v1/meta
+        if: steps.detect.outputs.run == 'true'
+        env:
+          GIT_SHA: ${{ github.sha }}
+        run: |
+          set -eu
+          build=$(curl -fsS http://localhost:8000/v1/meta | python3 -c 'import json,sys; print(json.load(sys.stdin)["build"])')
+          if [ "$build" != "$GIT_SHA" ]; then
+            echo "::error::/v1/meta build is $build, expected $GIT_SHA"
+            exit 1
+          fi
 
       # Keys exist only in this run's throwaway database; they're masked in the log anyway.
       - name: Issue API keys
@@ -412,7 +427,7 @@ jobs:
           export CONTRACT_SYSTEM_ID="$SYSTEM_ID" CONTRACT_WEBHOOKS=on \
             CONTRACT_RECEIVER_BIND=0.0.0.0:8099 \
             CONTRACT_RECEIVER_URL=http://tester:8099/contract-hook
-          docker compose --profile tester up --build --detach tester
+          GIT_SHA="$GITHUB_SHA" docker compose --profile tester up --build --detach tester
           for _ in $(seq 1 30); do
             if curl -fsS http://localhost:8100/openapi.json > /dev/null; then exit 0; fi
             sleep 2
@@ -514,7 +529,9 @@ jobs:
 
       - name: Build image
         if: steps.detect.outputs.run == 'true'
-        run: docker build -t app:ci .
+        env:
+          GIT_SHA: ${{ github.sha }}
+        run: docker build --build-arg GIT_SHA="$GIT_SHA" -t app:ci .
 
       - name: Scan Dockerfile
         if: steps.detect.outputs.run == 'true'
