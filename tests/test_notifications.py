@@ -287,6 +287,53 @@ class TestGapNotification:
         assert gap.state == EventState.GAP_OPEN
 
 
+class TestBreachNotification:
+    """D-21: the first accepted flag notification moves a breach FLAGGED -> UNDER_REVIEW."""
+
+    def test_delivery_moves_breach_to_under_review(self, uow, clock, chain, event):
+        uow.seed_webhook()
+        enqueue(uow, clock, event)
+        dispatch(uow, clock, RecordingSender(), chain)
+        assert event.state == EventState.UNDER_REVIEW
+        (entry,) = uow.ledger.entries
+        assert entry.entry_type == LedgerEntryType.NOTIFIED
+        assert entry.payload["state"] == "UNDER_REVIEW"
+
+    def test_failed_delivery_leaves_it_flagged(self, uow, clock, chain, event):
+        uow.seed_webhook()
+        enqueue(uow, clock, event)
+        dispatch(uow, clock, RecordingSender(respond=fail()), chain)
+        assert event.state == EventState.FLAGGED and uow.ledger.entries == []
+
+    def test_no_webhook_leaves_it_flagged(self, uow, clock, chain, event):
+        enqueue(uow, clock, event)
+        dispatch(uow, clock, RecordingSender(), chain)
+        assert event.state == EventState.FLAGGED
+
+    def test_second_webhook_does_not_move_it_again(self, uow, clock, chain, event):
+        uow.seed_webhook()
+        uow.seed_webhook()
+        enqueue(uow, clock, event)
+        dispatch(uow, clock, RecordingSender(), chain)
+        assert event.state == EventState.UNDER_REVIEW
+        first, second = uow.ledger.entries
+        assert first.payload["state"] == "UNDER_REVIEW" and "state" not in second.payload
+
+    @pytest.mark.parametrize("later", [EventState.DISPOSITIONED, EventState.CLOSED])
+    def test_a_reviewed_breach_keeps_its_state(self, uow, clock, chain, event, later):
+        uow.seed_webhook()
+        enqueue(uow, clock, event)
+        event.state = later.value
+        dispatch(uow, clock, RecordingSender(), chain)
+        assert event.state == later and "state" not in uow.ledger.entries[0].payload
+
+    def test_reminders_do_not_change_breach_state(self, uow, clock, chain, event):
+        uow.seed_webhook()
+        enqueue(uow, clock, event, type_=NotificationType.REMINDER)
+        dispatch(uow, clock, RecordingSender(), chain)
+        assert event.state == EventState.FLAGGED
+
+
 @pytest.mark.parametrize("max_delay", [timedelta(minutes=15), timedelta(minutes=5)])
 def test_ac04_breach_to_webhook_within_configured_delay(uow, max_delay):
     """AC-04: flag at detection, deliver on the next worker pass, within the configured delay."""

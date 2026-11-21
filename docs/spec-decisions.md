@@ -27,6 +27,7 @@ final, because cross-team tests depend on them.
 | D-18 | AC-05 checkpoints: calendar 5mo29d can fall after the 6-month minimum | Open, **pod** |
 | D-19 | Course testing interface: `/test/setup`, `/test/report` sessions, access, coverage | Interim (team) |
 | D-20 | REQ-07 prefill: which harm fields a breach prefills, and with what evidence | Decided (team, 2026-11-17); **pod** to confirm |
+| D-21 | What moves a breach from `FLAGGED` to `UNDER_REVIEW` | Decided (team, 2026-11-17); **pod** to confirm |
 | D-22 | Disposition details B-08/B-09 leave open (blank rationale, history, re-confirmation, Ex-2) | Interim (team, #38); **pod** to confirm |
 
 ## Agenda for the next pod meeting
@@ -46,10 +47,12 @@ Ordered by impact on cross-team testing:
 6. **D-03** (with D-12): confirm the team decision of 2026-11-17 (Section 5 names, report states
    internal, gap states unchanged).
 7. **D-08**: whether listing events writes ledger entries.
-8. **D-05** and **D-10**: needed before Phase 5 retention and evidence hashing.
-9. **D-11** to **D-16**: added with gap detection, notifications, auth, the ledger and the test
-   routes (Phase 3). D-13 and D-16 matter first, because the other team's harness needs keys,
-   fixtures and the test clock.
+8. **D-21** (with D-12): a breach goes `UNDER_REVIEW` when its flag notification is first
+   accepted, and stays `FLAGGED` with no webhook.
+9. **D-05** and **D-10**: needed before Phase 5 retention and evidence hashing.
+10. **D-11** to **D-16**: added with gap detection, notifications, auth, the ledger and the test
+    routes (Phase 3). D-13 and D-16 matter first, because the other team's harness needs keys,
+    fixtures and the test clock.
 
 ## D-01: Threshold direction (REQ-03, AC-03)
 
@@ -403,6 +406,29 @@ the monitored system**, never inferred from the metric:
 - On a breach, each listed field's `prefill_evidence` is built from the event's own breach facts
   (metric, observed value, threshold, time). Every other field is `null`. All four start
   `PENDING`; the reviewer still confirms each one (REQ-07, REQ-08a).
+
+## D-21: When a breach goes under review (Model 1, Model 5 Ex-1/Ex-4)
+
+**Gap.** Section 5 and Model 1 list `UNDER_REVIEW` after `FLAGGED` but don't say what triggers
+it. Model 5 expects it to have happened by Ex-1 `under-review` (PT6M, after the flag notification
+reached the reviewer) and Ex-4 `premature-report` (PT1H, although no reviewer has opened the
+event).
+
+**Decision (team, 2026-11-17; pod to confirm).** A breach moves `FLAGGED` → `UNDER_REVIEW` when a
+webhook **first accepts** (any `2xx`) its `flag_notification`, the same moment a gap moves
+`GAP_OPEN` → `REVIEWER_NOTIFIED` (D-12):
+
+- The change and its `NOTIFIED` ledger entry (with `"state": "UNDER_REVIEW"` in the payload) are
+  written in one transaction. Later deliveries (other webhooks, retries, reminders) add `NOTIFIED`
+  entries without a `state` and never move the event again.
+- Viewing the event doesn't change its state; nothing else moves it to `UNDER_REVIEW`.
+- **No webhook registered:** the notification stays undispatched (D-15) and the breach stays
+  `FLAGGED` until a subscribed webhook accepts it. Failed attempts don't change the state.
+- A breach that is already `DISPOSITIONED` or `CLOSED` when the notification is accepted keeps
+  its state.
+
+A harness reading the state right after a breach may see either `FLAGGED` or `UNDER_REVIEW`,
+because the worker can deliver within one pass; `tests/contract` accepts both there.
 
 ## D-22: Disposition details (REQ-07, REQ-08a/b, REQ-09, B-08, B-09, Model 5 Ex-2)
 
