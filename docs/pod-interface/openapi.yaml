@@ -785,7 +785,11 @@ components:
 
     NotificationType:
       type: string
-      enum: [flag_notification, reminder]
+      description: |
+        `ledger_alert` (**Proposed**, Phase 5, Model 5 Ex-5) is sent when the service's scheduled
+        ledger check finds tampering; its deliveries are `LedgerAlertDelivery`, not
+        `WebhookDelivery`.
+      enum: [flag_notification, reminder, ledger_alert]
 
     WebhookIn:
       type: object
@@ -798,7 +802,7 @@ components:
         event_types:
           type: array
           minItems: 1
-          maxItems: 2
+          maxItems: 3
           items: { $ref: "#/components/schemas/NotificationType" }
 
     WebhookOut:
@@ -837,6 +841,27 @@ components:
           properties:
             elapsed_percent: { type: integer, enum: [50, 80, 100] }
             deadline_utc: { type: string, format: date-time }
+
+    LedgerAlertDelivery:
+      type: object
+      description: |
+        **Proposed** (Phase 5, Model 5 Ex-5). The body of a `ledger_alert` delivery: the
+        service's scheduled ledger check failed. Sent once per incident (the first failing check
+        after a passing one).
+      required: [notification_id, notification_type, created_at, alert]
+      properties:
+        notification_id: { $ref: "#/components/schemas/Id", description: Deduplication key. }
+        notification_type: { const: ledger_alert }
+        created_at: { type: string, format: date-time }
+        deliver_by: { type: string, format: date-time }
+        alert:
+          type: object
+          required: [severity, checked_at, problem]
+          properties:
+            severity: { const: critical }
+            checked_at: { type: string, format: date-time }
+            problem: { type: string, description: What the check found, in words. }
+            first_mismatch: { type: [integer, "null"], description: First entry that doesn't verify. }
 
     ClockAdvanceIn:
       type: object

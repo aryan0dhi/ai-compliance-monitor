@@ -44,6 +44,8 @@ class Settings(BaseSettings):
     # Background worker: how often it sweeps for gaps and delivers notifications. Must be well
     # under notify_max_delay_s.
     worker_poll_interval_s: float = Field(default=5.0, gt=0)
+    # Scheduled ledger verification (#71): seconds of service clock between checks (daily).
+    ledger_check_interval_s: float = Field(default=86400.0, gt=0)
     # /healthz reports the worker as stale when its last heartbeat is older than this.
     worker_stale_after_s: float = Field(default=60.0, gt=0)
 

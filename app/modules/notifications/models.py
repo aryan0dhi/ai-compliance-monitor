@@ -22,6 +22,8 @@ class NotificationType(StrEnum):
 
     FLAG_NOTIFICATION = "flag_notification"
     REMINDER = "reminder"
+    # The scheduled ledger check found tampering (Ex-5, #71). About the ledger, not an event.
+    LEDGER_ALERT = "ledger_alert"
 
 
 class DeliveryStatus(StrEnum):
@@ -74,6 +76,11 @@ class Notification(Base):
             name="reminder_fields_match_type",
         ),
         CheckConstraint("reminder_percent IN (50, 80, 100)", name="reminder_percent_known"),
+        # Every notification is about an event except a ledger alert, which is about the ledger.
+        CheckConstraint(
+            f"(event_id IS NULL) = (notification_type = '{NotificationType.LEDGER_ALERT}')",
+            name="event_id_matches_type",
+        ),
         # Each checkpoint is sent once per event, even after a revision moves the deadline.
         Index(
             "uq_notification_reminder_once",
@@ -85,7 +92,8 @@ class Notification(Base):
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
-    event_id: Mapped[UUID] = mapped_column(ForeignKey("event.id", ondelete="RESTRICT"))
+    # Null only for ledger alerts.
+    event_id: Mapped[UUID | None] = mapped_column(ForeignKey("event.id", ondelete="RESTRICT"))
     notification_type: Mapped[str]
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
     # core.clock time of enqueueing: the detection time for flag notifications.

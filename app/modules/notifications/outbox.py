@@ -20,7 +20,7 @@ def notify_max_delay() -> timedelta:
 
 def build_notification(
     *,
-    event_id: UUID,
+    event_id: UUID | None,
     notification_type: str,
     payload: dict[str, Any],
     now: datetime,

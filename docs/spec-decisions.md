@@ -33,6 +33,7 @@ final, because cross-team tests depend on them.
 | D-24 | Reminder details B-11 leaves open (catch-up, revisions, closing, payload) | Interim (team, #40); **pod** to confirm |
 | D-25 | Report details B-12 leaves open (revision after assembly, submission, audit) | Interim (team, #41); **pod** to confirm |
 | D-26 | Which refused calls the audit trail records (Model 5 Ex-4) | Interim (team, #67); **pod** to confirm |
+| D-27 | Scheduled ledger check and its alert (Model 5 Ex-5) | Interim (team, #71); **pod** to confirm the alert format |
 
 ## Agenda for the next pod meeting
 
@@ -577,6 +578,41 @@ nor Ex-4 says which other refusals count.
 
 With this, `/v1/meta` lists phase 4. Ex-4 `premature-report` also expects `UNDER_REVIEW`, which
 needs a webhook to have accepted the flag notification (D-21). The live contract run has one.
+
+## D-27: Scheduled ledger check and alert (REQ-06, Model 5 Ex-5, D-14)
+
+**Gap.** Ex-5 `nightly-alert` expects a `critical` alert after tampering, but neither B-06 nor
+the pod interface says how often the ledger is checked, how a service alerts, or who receives
+it. D-14 also left open how truncation (entries removed from the end) is detected.
+
+**Interim behavior (#71; pod to confirm):**
+
+- **When.** The worker checks once per `LEDGER_CHECK_INTERVAL_S` of service clock (default
+  86400 s, "nightly"), and at worker start if there is no earlier check. On the test deployment
+  `/v1/test/clock/advance` brings it forward.
+- **What.**
+  - It re-walks the whole chain, exactly as `GET /v1/ledger/verify` does.
+  - The head of the last passing check (`head_seq`, `head_hash`) must still be in the chain
+    with the same hash. Entries removed or replaced at the end are therefore detected, which the
+    chain alone can't show.
+  - Each result is a `ledger_check` row; the check writes nothing to the ledger itself.
+- **Alert.**
+  - The first failing check after a passing one (one per incident) queues a `ledger_alert`
+    notification and logs at CRITICAL.
+  - The notification goes to every webhook subscribed to `ledger_alert`. Registering webhooks
+    is admin-only (D-13).
+  - The body is `{notification_id, notification_type, created_at, deliver_by, alert}`, where
+    `alert` has `severity: "critical"`, `checked_at`, `problem`, `first_mismatch`, the verified
+    head and the last passing head.
+  - Delivery uses the outbox (retries, signatures), and adds a `NOTIFIED` ledger entry with no
+    event. A later passing check closes the incident, and the next failure alerts again.
+- **Pod interface (Proposed).** `ledger_alert` added to `NotificationType`, `WebhookIn`
+  `maxItems` 3, and the new `LedgerAlertDelivery` schema.
+- **Limits.** `ledger_check` is in the same database as `ledger_entry`, so someone who can
+  rewrite both can hide tampering. Shipping each head to an outside store (or to the alert
+  webhook every night) would close that.
+- **Contract suite.** A black-box test can't tamper with another team's database, so
+  `await_alert` stays deferred; PostgreSQL integration tests cover it with direct SQL edits.
 
 ## Other notes
 

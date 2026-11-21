@@ -61,3 +61,37 @@ class LedgerEntry(Base):
     prev_hash: Mapped[str]
     # sha256 over the canonical form of all the fields above (app.modules.ledger.chain).
     entry_hash: Mapped[str]
+
+
+class LedgerCheck(Base):
+    """One scheduled verification of the whole chain by the worker (REQ-06, Model 5 Ex-5, #71).
+
+    Besides re-walking the chain, each check compares it with the head of the last check that
+    passed: entry `head_seq` must still exist with hash `head_hash`. That detects entries removed
+    from the end, which the chain alone can't show (D-14). Rows are never updated.
+    """
+
+    __tablename__ = "ledger_check"
+    __table_args__ = (
+        CheckConstraint("entries_checked >= 0", name="entries_checked_non_negative"),
+        CheckConstraint("head_seq >= 0", name="head_seq_non_negative"),
+        CheckConstraint("head_hash ~ '^[0-9a-f]{64}$'", name="head_hash_sha256"),
+        # A check fails exactly when it names the problem it found.
+        CheckConstraint("valid = (problem IS NULL)", name="valid_iff_no_problem"),
+        CheckConstraint("NOT (valid AND alerted)", name="only_failures_alert"),
+        Index("ix_ledger_check_checked_at", "checked_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True)
+    # core.clock time of the check.
+    checked_at: Mapped[datetime]
+    valid: Mapped[bool]
+    entries_checked: Mapped[int] = mapped_column(BigInteger)
+    # Last entry that verified (0 and 64 zeros for an empty ledger).
+    head_seq: Mapped[int] = mapped_column(BigInteger)
+    head_hash: Mapped[str]
+    # seq of the first entry that doesn't verify, if the chain itself is broken.
+    first_mismatch: Mapped[int | None] = mapped_column(BigInteger)
+    problem: Mapped[str | None]
+    # A ledger_alert was queued: the first failure after a passing check (one per incident).
+    alerted: Mapped[bool]

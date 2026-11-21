@@ -54,11 +54,15 @@ def delivery_body(notification: Notification) -> bytes:
     document: dict[str, object] = {
         "notification_id": str(notification.id),
         "notification_type": notification.notification_type,
-        "event_id": str(notification.event_id),
         "created_at": notification.created_at.isoformat(),
         "deliver_by": notification.deliver_by.isoformat(),
-        "event": notification.payload,
     }
+    if notification.event_id is None:
+        # A ledger alert (#71, pod LedgerAlertDelivery): about the ledger, not an event.
+        document["alert"] = notification.payload
+    else:
+        document["event_id"] = str(notification.event_id)
+        document["event"] = notification.payload
     if notification.reminder_percent is not None and notification.reminder_deadline_utc:
         # B-11: which checkpoint this is, and the deadline it counts towards.
         document["reminder"] = {
@@ -158,7 +162,7 @@ def record_result(
                     "webhook delivery abandoned after %s attempts: %s",
                     delivery.attempts,
                     delivery.last_error,
-                    extra={"event_id": str(notification.event_id)},
+                    extra={"event_id": str(notification.event_id or "")},
                 )
             else:
                 delivery.next_attempt_at = now + retry_delay(delivery.attempts)
@@ -178,7 +182,7 @@ def record_result(
             "within_max_delay": within_deadline,
             "attempts": delivery.attempts,
         }
-        event = uow.events.get(notification.event_id)
+        event = uow.events.get(notification.event_id) if notification.event_id else None
         if (
             event is not None
             and notification.notification_type == NotificationType.FLAG_NOTIFICATION
@@ -197,7 +201,7 @@ def record_result(
             logger.error(
                 "REQ-04: notification delivered after its maximum delay (deliver_by %s)",
                 notification.deliver_by.isoformat(),
-                extra={"event_id": str(notification.event_id)},
+                extra={"event_id": str(notification.event_id or "")},
             )
         return DeliveryStatus.DELIVERED
 

@@ -246,6 +246,21 @@ determination can't be deleted.
   (`reminder_deadline_utc`); other types leave both NULL (`ck_notification_reminder_fields_match_type`).
   `uq_notification_reminder_once` (unique on `event_id, reminder_percent` where set) sends each
   checkpoint once per event, even after a revision moves the deadline.
+- **Ledger alerts (Ex-5, migration 0011).** A `ledger_alert` row is about the ledger, not an
+  event: it's the only type with `event_id` NULL (`ck_notification_event_id_matches_type`).
+  Webhooks may subscribe to it, and its delivery body has `alert` instead of `event_id`/`event`.
+
+### `ledger_check` (module `ledger`, REQ-06, migration 0011)
+One row per scheduled verification by the worker (#71, D-27). Insert-only.
+- `valid`, `entries_checked`, `first_mismatch`, and the verified head (`head_seq`, `head_hash`).
+  `problem` says what failed, and is set exactly when `valid` is false
+  (`ck_ledger_check_valid_iff_no_problem`).
+- The latest passing check's head is what the next one compares against, to catch entries
+  removed from the end of the chain.
+- `alerted` marks the first failure of an incident, which queued a `ledger_alert`
+  (`ck_ledger_check_only_failures_alert`).
+- It lives in the same database as the ledger, so someone with full database access could rewrite
+  both. Shipping the head to an outside store is still open (D-27).
 
 ### Monitoring gaps (module `monitoring_gaps`, REQ-02) on `event`
 - `monitored_system.gap_missed_intervals` (default 3) sets the timeout per system.
