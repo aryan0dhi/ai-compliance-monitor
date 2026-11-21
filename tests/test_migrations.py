@@ -74,7 +74,7 @@ def _create_index_statements(sql: str) -> set[str]:
 
 def test_single_head():
     heads = ScriptDirectory.from_config(_config()).get_heads()
-    assert heads == ["0012"], heads
+    assert heads == ["0013"], heads
 
 
 @pytest.fixture(scope="module")
@@ -116,6 +116,15 @@ def test_downgrade_drops_everything():
     sql = _offline_sql("downgrade", "0002:0001")
     for table in ["event", "threshold_version", "metric_sample", "monitored_system"]:
         assert f"DROP TABLE {table};" in sql
+
+
+def test_0013_adds_the_event_retention_guard():
+    up = _offline_sql("upgrade", "0012:0013")
+    assert "CREATE FUNCTION event_retention_guard()" in up
+    assert "BEFORE DELETE OR UPDATE OF retain_until ON event" in up
+    down = _offline_sql("downgrade", "0013:0012")
+    assert "DROP TRIGGER event_retention_guard ON event" in down
+    assert "DROP FUNCTION event_retention_guard()" in down
 
 
 def test_0012_adds_record_key_and_the_erasure_entry_type():
