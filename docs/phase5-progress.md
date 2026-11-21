@@ -25,9 +25,21 @@ Migration line: `0009` on main → `0010` (#73) → `0011` (#74). New schema wor
 
 | Item | Branch / PR | What was done | Tests | CI | Merge status |
 |---|---|---|---|---|---|
-| REQ-16 erasure (#70), end-of-retention job | `work-issue-70-crypto-shredding`, stacked on #74, PR #75 | Per-event AES-256-GCM record keys wrapped by `RECORD_KEY_MASTER_KEY`; rationale, reviewer evidence, report document and submission note stored and ledgered sealed; worker destroys the key at `max(retain_until, detected_at + 6 months + 1 day)` with a `PERSONAL_DATA_ERASED` entry; migration `0012` seals existing rows; D-28 | Local, PostgreSQL 16: 981 passed, 0 failed, 43 skipped (live contract suite only); ruff, mypy, bandit, pip-audit clean | see PR | Open; waits for #73 and #74 |
-| REQ-05 retention guard (#69, part) | `work-issue-69-retention-guard`, stacked on #75 | Migration `0013`: trigger refuses deleting an event, or lowering `retain_until`, before retention on the service clock (incl. simulated offset); row deletion after retention not added (D-28 erases personal data instead) | Local, PostgreSQL 16: 988 passed, 0 failed, 43 skipped; ruff, mypy clean | see PR | Open; waits for #75 |
-| Operations note: signals, alerts, backups, recovery, release checklist (Phase 2 §6.3) | `docs-operations-note`, stacked on #76 | `docs/operations.md`; backup schedule and restore steps are recommendations, not run | docs only | see PR | Open |
+| REQ-16 erasure (#70), end-of-retention job | `work-issue-70-crypto-shredding`, stacked on #74, PR #75 | Per-event AES-256-GCM record keys wrapped by `RECORD_KEY_MASTER_KEY`; rationale, reviewer evidence, report document and submission note stored and ledgered sealed; worker destroys the key at `max(retain_until, detected_at + 6 months + 1 day)` with a `PERSONAL_DATA_ERASED` entry; migration `0012` seals existing rows; D-28 | Local, PostgreSQL 16: 981 passed, 0 failed, 43 skipped (live contract suite only); ruff, mypy, bandit, pip-audit clean | PR #75 at `f4bcb4e`: all 17 checks green; 981 passed, 43 skipped (run in the contract job: 43/43 passed), coverage 96.43 % | Open; waits for #73 and #74 |
+| REQ-05 retention guard (#69, part) | `work-issue-69-retention-guard`, stacked on #75 | Migration `0013`: trigger refuses deleting an event, or lowering `retain_until`, before retention on the service clock (incl. simulated offset); row deletion after retention not added (D-28 erases personal data instead) | Local, PostgreSQL 16: 988 passed, 0 failed, 43 skipped; ruff, mypy clean | PR #76 at `b79612b`: running | Open; waits for #75 |
+| Operations note: signals, alerts, backups, recovery, release checklist (Phase 2 §6.3) | `docs-operations-note`, stacked on #76 | `docs/operations.md`; backup schedule and restore steps are recommendations, not run | docs only | PR #77: running | Open |
+
+## Not started, and why
+
+- **#68 evidence-bundle hash:** D-05 (which window, when hashed) is an open pod decision; building
+  it now would mean inventing the rule.
+- **#72 phase 5 in `/v1/meta`:** last, after #73, #74, #75, #76 and a D-05 answer; listing phase 5
+  makes podmates' harnesses run Phase 5 steps against us.
+- **Chain head outside the database (REQ-06, §6.3):** follow-up to #74 (owner EthanBar25), noted as
+  a limit in D-27.
+- **REQ-15 explicit elapsed-time field, REQ-10 configurable calendar:** both change the shared
+  contract (B-15, B-10); pod decision first.
+- **PDF reports, health dashboard:** Phase 2 §6.4 allows dropping both; needs pod agreement.
 
 ## Blockers and decisions needed
 
