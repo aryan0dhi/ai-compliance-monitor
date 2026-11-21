@@ -14,6 +14,7 @@ to [spec-decisions.md](spec-decisions.md).
 | `0006` | `disposition`; `DISPOSITION` ledger entry type | REQ-08a/b, REQ-09 (B-08, B-09) |
 | `0007` | `deadline_utc` on `disposition` (backfilled) | REQ-10 (B-10, D-23) |
 | `0008` | `reminder_percent`, `reminder_deadline_utc` on `notification` | REQ-11 (B-11, D-24) |
+| `0012` | `record_key`; `PERSONAL_DATA_ERASED` ledger entry type; seals existing personal text | REQ-16, REQ-05 (D-28) |
 
 ## Diagram
 
@@ -262,6 +263,18 @@ One row per scheduled verification by the worker (#71, D-27). Insert-only.
 - It lives in the same database as the ledger, so someone with full database access could rewrite
   both. Shipping the head to an outside store is still open (D-27).
 
+### `record_key` (module `records`, REQ-16, migration 0012)
+One row per event that holds personal data (D-28). Never deleted.
+- `wrapped_key` is the event's random AES-256 data key, encrypted (AES-GCM) with
+  `RECORD_KEY_MASTER_KEY` and bound to `event_id`. The plain data key is never stored.
+- Personal text is stored **sealed** with that key as `enc:v1:<base64url>` tokens:
+  `disposition.rationale`, `harm_field.evidence`, `report.document` and
+  `report.submission_note`. The same tokens go into the `DISPOSITION` and `REPORT_SUBMITTED`
+  ledger payloads, so ledger hashes are over ciphertext.
+- Erasure sets `wrapped_key` to NULL and `destroyed_at` to the service-clock time
+  (`ck_record_key_destroyed_has_no_key`). The sealed tokens stay where they are and can't be
+  opened any more; no row or ledger entry changes, so the chain still verifies (AC-18).
+
 ### Monitoring gaps (module `monitoring_gaps`, REQ-02) on `event`
 - `monitored_system.gap_missed_intervals` (default 3) sets the timeout per system.
 - Gap events have `type = 'monitoring_gap'`, their own states (D-12), `gap_started_at` (last data
@@ -273,9 +286,9 @@ One row per scheduled verification by the worker (#71, D-27). Insert-only.
 Single-row tables: the test environment's clock offset, shared by the API and the worker (D-16),
 and the worker's liveness for `/healthz`.
 
-## Retention (REQ-05): storage only
+## Retention (REQ-05) and erasure (REQ-16)
 
-Phase 3 implements the **storage** part of REQ-05:
+The **storage** part of REQ-05 (Phase 3):
 - `event.retain_until` is stored for every event. `app.modules.events.models.retain_until_for()`
   computes it as `detected_at` + 6 calendar months in UTC.
 - `ck_event_retain_until_min_6_months` makes the database reject any event whose `retain_until` is
@@ -284,12 +297,17 @@ Phase 3 implements the **storage** part of REQ-05:
 - `RESTRICT` foreign keys stop a monitored system, threshold version or triggering sample from being
   deleted while an event references it.
 
-**Not implemented yet** (Phase 5, retention half of REQ-05; AC-05):
-- Nothing currently *prevents* deleting an `event` row or a non-triggering `metric_sample` before
-  `retain_until`, other than the foreign keys above.
-- No job removes data after its retention period, and nothing protects the ±1 h evidence-window
-  samples of an event (D-05).
-- Backup retention (Lightsail keeps 7 days of point-in-time restore) is not part of this.
+**End of retention** (REQ-16, D-28): the worker destroys an event's record key once the service
+clock reaches `max(retain_until, detected_at + 6 calendar months + 1 day)`
+(`records.service.erasure_due_at`), and writes one `PERSONAL_DATA_ERASED` ledger entry. The event
+and its metric data are kept (REQ-05 is a minimum); only its personal text becomes unreadable.
+
+**Not implemented yet** (#69, #68):
+- Nothing *prevents* deleting an `event` row or a non-triggering `metric_sample` before
+  `retain_until` by direct SQL, other than the foreign keys above (a trigger is proposed in #69).
+- Nothing deletes rows after retention, and nothing protects the ±1 h evidence-window samples of
+  an event (D-05).
+- Backups: the GCP test deployment has only the VM disk; there is no database backup schedule.
 
 ## Extending the schema
 

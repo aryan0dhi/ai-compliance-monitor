@@ -15,6 +15,7 @@ from app.modules.auth.interface import Role
 from app.modules.auth.service import create_user
 from app.modules.ledger.models import LedgerEntry
 from app.modules.ledger.service import verify_ledger
+from app.modules.records.service import evidence_purpose
 from app.modules.review.disposition import (
     DispositionRequest,
     FieldConfirmation,
@@ -27,7 +28,7 @@ from app.modules.review.models import (
     HarmFieldStatus,
 )
 from tests.conftest import T0
-from tests.fakes import FixedClock, user_principal
+from tests.fakes import FixedClock, opened, user_principal
 
 ALL_NA = {name.value: {"status": "NOT_APPLICABLE"} for name in HarmFieldName}
 EX1_FIELDS = {
@@ -253,9 +254,10 @@ def test_service_confirmation_types_round_trip(stack):
     )
     with stack.make_uow() as uow:
         fields = uow.harm_fields.for_event(event_id)
-        assert [(f.status, f.evidence) for f in fields] == [
-            ("NOT_APPLICABLE", "n/a: " + n.value) for n in HarmFieldName
-        ]
+        # Stored sealed (REQ-16); opened with the event's key they round-trip exactly.
+        assert [
+            (f.status, opened(uow, event_id, evidence_purpose(f.name), f.evidence)) for f in fields
+        ] == [("NOT_APPLICABLE", "n/a: " + n.value) for n in HarmFieldName]
 
 
 def test_reminders_on_postgres_at_the_ac12_boundaries(stack, clock):

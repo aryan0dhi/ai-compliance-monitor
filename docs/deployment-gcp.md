@@ -13,7 +13,7 @@ internet ──443/80──► caddy (HTTPS, Let's Encrypt) ──► api (uvico
 | VM | `compliance-monitor`, `e2-small`, `us-central1-a`, Debian 12, 20 GB standard disk |
 | Address | static IP `compliance-monitor-ip`; hostname `<ip-with-dashes>.sslip.io` (free wildcard DNS) |
 | Firewall | `compliance-monitor-web` allows tcp 80 and 443 to the VM; SSH via `gcloud compute ssh` |
-| Environment | `APP_ENV=test`, `ENABLE_TEST_ROUTES=true` (for cross-team testing), random DB password in `/opt/compliance-monitor/deploy/gcp/.env` on the VM |
+| Environment | `APP_ENV=test`, `ENABLE_TEST_ROUTES=true` (for cross-team testing), random DB password and `RECORD_KEY_MASTER_KEY` (REQ-16, created by `remote-up.sh` if missing) in `/opt/compliance-monitor/deploy/gcp/.env` on the VM. Back the master key up outside the VM: without it, sealed personal data can't be read |
 | Cost (estimate) | about $12/month for e2-small, plus about $1/month for the disk and about $4/month for the in-use IPv4 address; stop or delete the VM when not testing |
 
 The decision to use GCP replaces the AWS Lightsail plan in Phase 2 Q7.3. The container layout is

@@ -34,6 +34,7 @@ TABLES = [
     "report",
     "disposition",
     "harm_field",
+    "record_key",
     "event",
     "threshold_version",
     "metric_sample",

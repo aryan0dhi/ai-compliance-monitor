@@ -18,6 +18,13 @@ from app.modules.auth.interface import Principal, Role
 from app.modules.events.models import Event, EventState, EventType
 from app.modules.events.service import EventNotFound, EventRecord
 from app.modules.ledger.interface import LedgerEntryType, LedgerWriter
+from app.modules.records.service import (
+    Vault,
+    evidence_purpose,
+    open_vault,
+    rationale_purpose,
+    revealed_rationales,
+)
 from app.modules.review.deadlines import DeadlineState, LooserTierNeedsRationale
 from app.modules.review.deadlines import apply as apply_deadline
 from app.modules.review.models import (
@@ -71,6 +78,7 @@ def _apply_confirmations(
     event: Event,
     confirmations: dict[HarmFieldName, FieldConfirmation],
     *,
+    vault: Vault,
     reviewer: UUID,
     at: datetime,
 ) -> list[HarmField]:
@@ -88,7 +96,8 @@ def _apply_confirmations(
     for name, confirmation in confirmations.items():
         f = by_name[name.value]
         f.status = confirmation.status.value
-        f.evidence = confirmation.evidence
+        # Sealed with the event's key (REQ-16): a reviewer's evidence may describe people.
+        f.evidence = vault.seal(evidence_purpose(name.value), confirmation.evidence)
         f.confirmed_by = reviewer
         f.confirmed_at = at
     return fields
@@ -124,8 +133,14 @@ def record_disposition(
         if event.type != EventType.THRESHOLD_BREACH:
             raise DispositionConflict("monitoring-gap events are never reviewed (INV-12)")
         now = clock.now()
+        vault = open_vault(uow, event.id, create_at=now)
+        if vault.erased_at is not None:
+            raise DispositionConflict(
+                "the event's personal data was erased after its retention period (REQ-16), so "
+                "it can't take another disposition"
+            )
         fields = _apply_confirmations(
-            uow, event, request.harm_fields, reviewer=principal.actor_id, at=now
+            uow, event, request.harm_fields, vault=vault, reviewer=principal.actor_id, at=now
         )
         pending = [f.name for f in fields if f.status == HarmFieldStatus.PENDING]
         if pending:
@@ -150,13 +165,14 @@ def record_disposition(
             )
         except LooserTierNeedsRationale as exc:
             raise DispositionConflict(str(exc)) from exc
+        seq = previous.seq + 1 if previous else 1
         disposition = Disposition(
             event_id=event.id,
-            seq=previous.seq + 1 if previous else 1,
+            seq=seq,
             tier=request.tier.value,
             previous_tier=previous.tier if previous else None,
             reviewer_id=principal.actor_id,
-            rationale=request.rationale,
+            rationale=vault.seal(rationale_purpose(seq), request.rationale),
             recorded_at=now,
             deadline_utc=after.deadline,
         )
@@ -168,11 +184,16 @@ def record_disposition(
             uow.session,
             entry_type=LedgerEntryType.DISPOSITION,
             actor_id=principal.actor_id,
-            payload=_ledger_payload(event, disposition, request.harm_fields),
+            payload=_ledger_payload(event, disposition, request.harm_fields, fields),
             event_id=event.id,
         )
         dispositions = [*history, disposition]
-    return EventRecord(event=event, harm_fields=fields, dispositions=dispositions)
+    return EventRecord(
+        event=event,
+        harm_fields=fields,
+        dispositions=dispositions,
+        rationales=revealed_rationales(vault, dispositions),
+    )
 
 
 def _iso(value: datetime) -> str:
@@ -183,7 +204,11 @@ def _ledger_payload(
     event: Event,
     disposition: Disposition,
     confirmations: dict[HarmFieldName, FieldConfirmation],
+    fields: list[HarmField],
 ) -> dict[str, Any]:
+    """The ledger holds the sealed rationale and evidence (REQ-16), so their hashes outlive the
+    event's key and the text doesn't."""
+    sealed_evidence = {f.name: f.evidence for f in fields}
     return {
         "event_id": str(event.id),
         "seq": disposition.seq,
@@ -194,7 +219,7 @@ def _ledger_payload(
         "recorded_at": _iso(disposition.recorded_at),
         "deadline_utc": _iso(disposition.deadline_utc) if disposition.deadline_utc else None,
         "harm_fields": {
-            name.value: {"status": c.status.value, "evidence": c.evidence}
+            name.value: {"status": c.status.value, "evidence": sealed_evidence[name.value]}
             for name, c in sorted(
                 confirmations.items(), key=lambda item: list(HarmFieldName).index(item[0])
             )

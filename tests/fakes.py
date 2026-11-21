@@ -34,6 +34,7 @@ from app.modules.notifications.models import (
     Webhook,
 )
 from app.modules.notifications.outbox import build_notification
+from app.modules.records.models import RecordKey
 from app.modules.review.models import Disposition, HarmField, HarmFieldName, Report
 from app.modules.systems.models import MonitoredSystem
 from app.modules.thresholds.models import ThresholdVersion
@@ -213,6 +214,28 @@ class FakeReportRepository:
         return self.rows.get((event_id, disposition_seq))
 
 
+class FakeRecordKeyRepository:
+    def __init__(self, events: FakeEventRepository) -> None:
+        self.rows: dict[UUID, RecordKey] = {}
+        self._events = events
+
+    def get(self, event_id: UUID) -> RecordKey | None:
+        return self.rows.get(event_id)
+
+    def add(self, key: RecordKey) -> None:
+        if key.event_id in self.rows:
+            raise ValueError(f"duplicate record key {key.event_id}")  # the primary key in SQL
+        self.rows[key.event_id] = key
+
+    def live_past_retention(self, now: datetime) -> list[UUID]:
+        live = [
+            self._events.rows[k.event_id]
+            for k in self.rows.values()
+            if k.destroyed_at is None and self._events.rows[k.event_id].retain_until <= now
+        ]
+        return [e.id for e in sorted(live, key=lambda e: (e.retain_until, e.id))]
+
+
 class FakeAuthRepository:
     def __init__(self) -> None:
         self.users: dict[UUID, AppUser] = {}
@@ -332,6 +355,7 @@ class FakeUnitOfWork:
         self.harm_fields = FakeHarmFieldRepository()
         self.dispositions = FakeDispositionRepository()
         self.reports = FakeReportRepository()
+        self.record_keys = FakeRecordKeyRepository(self.events)
         self.auth = FakeAuthRepository()
         self.ledger = FakeLedgerRepository()
         self.ledger_checks = FakeLedgerCheckRepository()
@@ -349,6 +373,7 @@ class FakeUnitOfWork:
             self.harm_fields,
             self.dispositions,
             self.reports,
+            self.record_keys,
             self.auth,
             self.ledger,
             self.ledger_checks,
@@ -591,3 +616,13 @@ if TYPE_CHECKING:
     )
     _sender: WebhookSender = RecordingSender()
     _clock: Clock = FixedClock(datetime.now())
+
+
+def opened(uow: Any, event_id: UUID | str, purpose: str, stored: str | None) -> str | None:
+    """A stored personal-data value opened with its event's key (REQ-16). Fails unless the
+    stored value is sealed, so tests check both that it's unreadable and what it says."""
+    from app.modules.records.crypto import is_token
+    from app.modules.records.service import open_vault
+
+    assert stored is None or is_token(stored), f"stored in clear: {stored!r}"
+    return open_vault(uow, UUID(str(event_id))).reveal(purpose, stored)

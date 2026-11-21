@@ -34,6 +34,7 @@ final, because cross-team tests depend on them.
 | D-25 | Report details B-12 leaves open (revision after assembly, submission, audit) | Interim (team, #41); **pod** to confirm |
 | D-26 | Which refused calls the audit trail records (Model 5 Ex-4) | Interim (team, #67); **pod** to confirm |
 | D-27 | Scheduled ledger check and its alert (Model 5 Ex-5) | Interim (team, #71); **pod** to confirm the alert format |
+| D-28 | REQ-16 erasure: what is personal data, when it is erased, how reads show it | Interim (team, #70, from Phase 2 Q7.1/Q7.2); **pod** to confirm the API field |
 
 ## Agenda for the next pod meeting
 
@@ -613,6 +614,37 @@ it. D-14 also left open how truncation (entries removed from the end) is detecte
   webhook every night) would close that.
 - **Contract suite.** A black-box test can't tamper with another team's database, so
   `await_alert` stays deferred; PostgreSQL integration tests cover it with direct SQL edits.
+
+## D-28: Erasing personal data at the end of retention (REQ-16, AC-18, REQ-05, D-18)
+
+**Gap.** REQ-16 asks that a record's personal-data fields can be made permanently unreadable after
+its retention period without changing its place in the tamper-evident chain. Section 5 has no
+field or operation for it, and nothing says which fields are personal.
+
+**Design (team, Phase 2 Q7.2 Decision 1 and Q7.1).** Per-event keys, as planned in Phase 2:
+- **Personal data** is free text a person writes about an event: the disposition `rationale`, the
+  `evidence` a reviewer gives when confirming a harm field, the report `submission_note`, and the
+  assembled report document (it quotes the rationale). Machine-generated values (metric values,
+  prefilled breach evidence, ids, timestamps) are not. Actor ids stay readable so the audit trail
+  works; they are pseudonymous.
+- Each such value is sealed with the event's AES-256-GCM data key before it is stored or put in a
+  ledger payload. The data key is stored only wrapped by `RECORD_KEY_MASTER_KEY` (`record_key`).
+- **When.** The worker erases an event's personal data once the service clock reaches
+  `max(retain_until, detected_at + 6 calendar months + 1 day)`. The extra day keeps AC-05's
+  literal 5mo29d check intact whichever way D-18 is decided. The test clock drives it.
+- **How.** The key is destroyed (`wrapped_key` NULL, `destroyed_at` set) with one
+  `PERSONAL_DATA_ERASED` ledger entry (actor null). No row or earlier ledger entry changes, so
+  `GET /v1/ledger/verify` still passes and an earlier export still re-verifies (AC-18).
+- **Reads after erasure.** Rationales read as `null`; `GET /v1/events/{id}` adds
+  `personal_data_erased_at` (**Proposed** for the pod interface; additive and optional, not yet
+  in `docs/pod-interface/openapi.yaml`). The report and a new disposition are `409` (the document
+  quotes personal data). The event and its metric data stay (REQ-05 is a minimum, not a purge).
+- **Limits.** Ledger entries written before migration 0012 keep the plaintext they were hashed
+  with; reset the test environment after deploying 0012. Without `RECORD_KEY_MASTER_KEY` the
+  public development key is used outside production, which protects nothing.
+
+**To agree with the pod.** The `personal_data_erased_at` field and `409` for an erased report, and
+whether deleting rows after retention (#69) is wanted at all once personal data is erased.
 
 ## Other notes
 

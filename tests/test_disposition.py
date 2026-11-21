@@ -22,6 +22,7 @@ from app.modules.ledger.interface import LedgerEntryType, get_ledger
 from app.modules.metrics.models import MetricType
 from app.modules.metrics.service import MetricSubmission, ingest_metric
 from app.modules.notifications.interface import get_notifier
+from app.modules.records.service import evidence_purpose
 from app.modules.review.disposition import (
     DispositionConflict,
     DispositionDenied,
@@ -32,7 +33,13 @@ from app.modules.review.disposition import (
 )
 from app.modules.review.models import DispositionTier, HarmFieldName, HarmFieldStatus
 from tests.conftest import T0
-from tests.fakes import RecordingLedger, RecordingNotifier, system_principal, user_principal
+from tests.fakes import (
+    RecordingLedger,
+    RecordingNotifier,
+    opened,
+    system_principal,
+    user_principal,
+)
 
 SYSTEM = UUID("550e8400-e29b-41d4-a716-446655440000")
 CONFIRMED, NA = HarmFieldStatus.CONFIRMED, HarmFieldStatus.NOT_APPLICABLE
@@ -129,7 +136,11 @@ class TestFirstDisposition:
         assert record.event.state == EventState.DISPOSITIONED
         by_name = {f.name: f for f in record.harm_fields}
         assert by_name["fundamental_rights"].status == CONFIRMED
-        assert by_name["fundamental_rights"].evidence == "credit denied to applicants"
+        # Stored sealed with the event's key (REQ-16).
+        rights = by_name["fundamental_rights"].evidence
+        assert opened(uow, event_id, evidence_purpose("fundamental_rights"), rights) == (
+            "credit denied to applicants"
+        )
         assert by_name["health_safety"].status == NA
         assert {(f.confirmed_by, f.confirmed_at) for f in record.harm_fields} == {
             (reviewer.actor_id, clock.now())
@@ -154,6 +165,11 @@ class TestFirstDisposition:
         (entry,) = ledger.calls
         assert entry["entry_type"] == LedgerEntryType.DISPOSITION
         assert entry["actor_id"] == reviewer.actor_id and entry["event_id"] == event_id
+        # The ledger holds the evidence sealed (REQ-16), the same token as the harm_field row.
+        sealed = entry["payload"]["harm_fields"]["fundamental_rights"]["evidence"]
+        assert opened(uow, event_id, evidence_purpose("fundamental_rights"), sealed) == (
+            "credit denied to applicants"
+        )
         assert entry["payload"] == {
             "event_id": str(event_id),
             "seq": 1,
@@ -166,10 +182,7 @@ class TestFirstDisposition:
             "harm_fields": {
                 "health_safety": {"status": "NOT_APPLICABLE", "evidence": None},
                 "critical_infrastructure": {"status": "NOT_APPLICABLE", "evidence": None},
-                "fundamental_rights": {
-                    "status": "CONFIRMED",
-                    "evidence": "credit denied to applicants",
-                },
+                "fundamental_rights": {"status": "CONFIRMED", "evidence": sealed},
                 "property_environment": {"status": "NOT_APPLICABLE", "evidence": None},
             },
         }
@@ -329,15 +342,20 @@ class TestRevisions:
         change = {HarmFieldName.HEALTH_SAFETY: FieldConfirmation(CONFIRMED, "patient harmed")}
         record = dispose(uow, ledger, clock, event_id, reviewer, DEATH, fields=change)
         health = next(f for f in record.harm_fields if f.name == "health_safety")
-        assert (health.status, health.evidence, health.confirmed_at) == (
+        purpose = evidence_purpose("health_safety")
+        assert (
+            health.status,
+            opened(uow, event_id, purpose, health.evidence),
+            health.confirmed_at,
+        ) == (
             CONFIRMED,
             "patient harmed",
             clock.now(),
         )
         assert ledger.calls[0]["payload"]["harm_fields"]["health_safety"]["status"] == NA
-        assert ledger.calls[1]["payload"]["harm_fields"] == {
-            "health_safety": {"status": "CONFIRMED", "evidence": "patient harmed"}
-        }
+        logged = ledger.calls[1]["payload"]["harm_fields"]
+        assert logged == {"health_safety": {"status": "CONFIRMED", "evidence": health.evidence}}
+        assert opened(uow, event_id, purpose, health.evidence) == "patient harmed"
 
     def test_failed_revision_keeps_the_previous_disposition(self, uow, clock, event_id, reviewer):
         ledger = RecordingLedger()

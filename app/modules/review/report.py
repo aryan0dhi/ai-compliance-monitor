@@ -21,8 +21,15 @@ from app.modules.auth.interface import Principal, Role
 from app.modules.events.models import Event, EventType
 from app.modules.events.service import EventNotFound, EventRecord
 from app.modules.ledger.interface import LedgerEntryType, LedgerWriter
+from app.modules.records.service import (
+    Vault,
+    note_purpose,
+    open_vault,
+    report_purpose,
+    revealed_rationales,
+)
 from app.modules.review.models import Disposition, DispositionTier, Report
-from app.modules.review.report_schemas import assemble_document, sha256_hex
+from app.modules.review.report_schemas import RevealedReport, assemble_document, sha256_hex
 
 # B-13 / REQ-13: reports are for reviewers; viewers and admins get 403 like for dispositions.
 REPORT_ROLES = frozenset({Role.REVIEWER})
@@ -64,6 +71,33 @@ def _iso(value: datetime) -> str:
     return value.astimezone(UTC).isoformat()
 
 
+def _open_vault(uow: UnitOfWork, event: Event, now: datetime) -> Vault:
+    vault = open_vault(uow, event.id, create_at=now)
+    if vault.erased_at is not None:
+        raise ReportUnavailable(
+            "the event's personal data, and so its report, was erased after its retention "
+            "period (REQ-16)"
+        )
+    return vault
+
+
+def _revealed(report: Report, vault: Vault) -> RevealedReport:
+    document = vault.reveal(report_purpose(report.disposition_seq), report.document)
+    if document is None:  # pragma: no cover - _open_vault refuses erased events first
+        raise ReportUnavailable("the report was erased (REQ-16)")
+    return RevealedReport(
+        event_id=report.event_id,
+        disposition_seq=report.disposition_seq,
+        document=document,
+        report_sha256=report.report_sha256,
+        assembled_at=report.assembled_at,
+        assembled_by=report.assembled_by,
+        submitted_at=report.submitted_at,
+        submitted_by=report.submitted_by,
+        submission_note=vault.reveal(note_purpose(report.disposition_seq), report.submission_note),
+    )
+
+
 def get_report(
     event_id: UUID,
     *,
@@ -71,14 +105,18 @@ def get_report(
     uow: UnitOfWork,
     ledger: LedgerWriter,
     clock: Clock,
-) -> Report:
+) -> RevealedReport:
     """The report of the event's current determination, assembling and storing it first if
     needed. Raises ReportDenied (403), EventNotFound (404) or ReportUnavailable (409); nothing is
-    written in those cases."""
+    written in those cases.
+
+    The stored document is sealed with the event's key (REQ-16); report_sha256 is over the
+    document as assembled, so the hash identifies the report even after the key is destroyed."""
     authorize_report(principal)
     with uow:
         event = _locked_event(uow, event_id)
         history = _serious_history(uow, event)
+        vault = _open_vault(uow, event, clock.now())
         current = history[-1]
         report = uow.reports.get(event.id, current.seq)
         if report is not None:
@@ -89,16 +127,22 @@ def get_report(
                 payload={"event_id": str(event.id), "report_sha256": report.report_sha256},
                 event_id=event.id,
             )
-            return report
+            return _revealed(report, vault)
         now = clock.now()
         record = EventRecord(
-            event=event, harm_fields=uow.harm_fields.for_event(event.id), dispositions=history
+            event=event,
+            harm_fields=uow.harm_fields.for_event(event.id),
+            dispositions=history,
+            rationales=revealed_rationales(vault, history),
         )
         document = assemble_document(record, assembled_at=now)
+        sealed = vault.seal(report_purpose(current.seq), document)
+        if sealed is None:  # pragma: no cover - a document is never None
+            raise ValueError("an assembled report has text")
         report = Report(
             event_id=event.id,
             disposition_seq=current.seq,
-            document=document,
+            document=sealed,
             report_sha256=sha256_hex(document),
             assembled_at=now,
             assembled_by=principal.actor_id,
@@ -117,7 +161,7 @@ def get_report(
             },
             event_id=event.id,
         )
-    return report
+    return _revealed(report, vault)
 
 
 def mark_report_submitted(
@@ -128,13 +172,15 @@ def mark_report_submitted(
     uow: UnitOfWork,
     ledger: LedgerWriter,
     clock: Clock,
-) -> Report:
+) -> RevealedReport:
     """Record that the reviewer submitted the current report to the authority (outside the
-    system). The report must have been assembled (GET) and not yet marked submitted, else 409."""
+    system). The report must have been assembled (GET) and not yet marked submitted, else 409.
+    The note is sealed with the event's key (REQ-16)."""
     authorize_report(principal)
     with uow:
         event = _locked_event(uow, event_id)
         current = _serious_history(uow, event)[-1]
+        vault = _open_vault(uow, event, clock.now())
         report = uow.reports.get(event.id, current.seq)
         if report is None:
             raise ReportUnavailable(
@@ -147,7 +193,7 @@ def mark_report_submitted(
         now = clock.now()
         report.submitted_at = now
         report.submitted_by = principal.actor_id
-        report.submission_note = note
+        report.submission_note = vault.seal(note_purpose(report.disposition_seq), note)
         ledger.append(
             uow.session,
             entry_type=LedgerEntryType.REPORT_SUBMITTED,
@@ -157,8 +203,8 @@ def mark_report_submitted(
                 "disposition_seq": report.disposition_seq,
                 "report_sha256": report.report_sha256,
                 "submitted_at": _iso(now),
-                "note": note,
+                "note": report.submission_note,
             },
             event_id=event.id,
         )
-    return report
+    return _revealed(report, vault)

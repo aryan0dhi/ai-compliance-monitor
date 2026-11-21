@@ -31,6 +31,9 @@ class LedgerEntryType(StrEnum):
     # A disposition or report call on an existing event was refused (403/409); nothing changed.
     # Written in its own transaction after the refusal (B-14, Model 5 Ex-4; D-26).
     REFUSED = "REFUSED"
+    # The event's record key was destroyed at the end of its retention period, so its personal
+    # data is unreadable from now on (REQ-16, AC-18; D-28). Written by the worker (actor null).
+    PERSONAL_DATA_ERASED = "PERSONAL_DATA_ERASED"
 
 
 class LedgerEntry(Base):

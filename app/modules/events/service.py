@@ -16,6 +16,7 @@ from app.modules.events.repository import EventFilters
 from app.modules.ledger.interface import LedgerEntryType, LedgerWriter
 from app.modules.metrics.models import MetricSample
 from app.modules.notifications.interface import NotificationType, Notifier
+from app.modules.records.service import open_vault, revealed_rationales
 from app.modules.review.models import Disposition, HarmField
 from app.modules.thresholds.models import ThresholdVersion
 
@@ -49,6 +50,10 @@ class EventRecord:
     harm_fields: list[HarmField]
     # Oldest first; empty until a reviewer assigns a tier.
     dispositions: list[Disposition] = field(default_factory=list)
+    # Each disposition's rationale in plaintext, by seq. The stored value is sealed (REQ-16); a
+    # rationale reads as null once the event's personal data has been erased, or if missing here.
+    rationales: dict[int, str | None] = field(default_factory=dict)
+    personal_data_erased_at: datetime | None = None
 
 
 def event_payload(event: Event) -> dict[str, Any]:
@@ -166,4 +171,11 @@ def get_event(
         )
         harm_fields = uow.harm_fields.for_event(event.id)
         dispositions = uow.dispositions.for_event(event.id)
-    return EventRecord(event=event, harm_fields=harm_fields, dispositions=dispositions)
+        vault = open_vault(uow, event.id)
+    return EventRecord(
+        event=event,
+        harm_fields=harm_fields,
+        dispositions=dispositions,
+        rationales=revealed_rationales(vault, dispositions),
+        personal_data_erased_at=vault.erased_at,
+    )

@@ -59,10 +59,25 @@ class Settings(BaseSettings):
     # hosted tester's receiver on the compose network can be registered. Ignored in production.
     webhook_private_hosts: str = ""
 
+    # REQ-16: base64 of 32 random bytes that wraps every event's record key
+    # (app/modules/records). Sealing personal data fails without it in production; elsewhere a
+    # public development key is used when it is unset. Losing it makes all sealed data unreadable.
+    record_key_master_key: SecretStr | None = None
+
     @model_validator(mode="after")
     def _poll_faster_than_notification_deadline(self) -> "Settings":
         if self.worker_poll_interval_s >= self.notify_max_delay_s:
             raise ValueError("WORKER_POLL_INTERVAL_S must be shorter than NOTIFY_MAX_DELAY_S")
+        return self
+
+    @model_validator(mode="after")
+    def _record_key_master_key_is_well_formed(self) -> "Settings":
+        # Being set at all is checked where it's used (records.service.master_key), so settings
+        # that never seal anything (most tests) don't need one.
+        if self.record_key_master_key is not None:
+            from app.modules.records.crypto import parse_master_key
+
+            parse_master_key(self.record_key_master_key.get_secret_value())
         return self
 
     @property
