@@ -35,7 +35,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     register_error_handlers(app)
     app.include_router(health.router)
-    app.include_router(v1.build_router(include_test_routes=test_routes))
+    app.include_router(v1.build_router(include_test_routes=test_routes, build=settings.git_sha))
     if test_routes:
         # Course cross-team testing interface, at the service root (D-19).
         from app.modules.testing.session_router import router as session_router

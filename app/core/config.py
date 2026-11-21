@@ -20,6 +20,8 @@ class Settings(BaseSettings):
 
     app_env: AppEnv = AppEnv.DEVELOPMENT
     log_level: str = "INFO"
+    # Commit the image was built from (Dockerfile GIT_SHA build arg); shown on GET /v1/meta.
+    git_sha: str = "unknown"
 
     # /v1/test/* routes (pod contract, Section 5). Must stay off in production.
     enable_test_routes: bool = False

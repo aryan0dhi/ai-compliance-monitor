@@ -23,6 +23,7 @@ services:
       context: .
       args:
         INSTALL_DEV: "true"
+        GIT_SHA: ${GIT_SHA:-unknown}
     env_file: .env
     environment:
       POSTGRES_HOST: db
@@ -53,6 +54,7 @@ services:
       context: .
       args:
         INSTALL_DEV: "true"
+        GIT_SHA: ${GIT_SHA:-unknown}
     command: ["python", "-m", "app.worker"]
     env_file: .env
     environment:
@@ -75,6 +77,7 @@ services:
       context: .
       args:
         INSTALL_DEV: "true"
+        GIT_SHA: ${GIT_SHA:-unknown}
     command: ["uvicorn", "tester.main:app", "--host", "0.0.0.0", "--port", "8100"]
     environment:
       CONTRACT_SYSTEM_KEY: ${CONTRACT_SYSTEM_KEY:-}

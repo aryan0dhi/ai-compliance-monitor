@@ -45,6 +45,11 @@ COPY tests ./tests
 # Tester service (uvicorn tester.main:app); only usable in dev images, which have pytest.
 COPY tester ./tester
 
+# The commit this image was built from, shown as "build" on GET /v1/meta (#45). CI and
+# deploy/gcp pass it; a plain `docker build` says "unknown". Last, so it doesn't bust the cache.
+ARG GIT_SHA=unknown
+ENV GIT_SHA=$GIT_SHA
+
 RUN useradd --create-home --uid 1000 appuser && chmod +x scripts/*.sh
 USER appuser
 
