@@ -161,8 +161,9 @@ def test_submission(stack, clock):
     assert verify_ledger(principal=user_principal(Role.VIEWER), uow=stack.make_uow()).valid
 
 
-def test_refusals_write_nothing(stack):
-    """REQ-08a, REQ-13: 409 before a serious tier or after NOT_SERIOUS; 403 for other roles."""
+def test_refusals_change_nothing_and_are_audited(stack):
+    """REQ-08a, REQ-13: 409 before a serious tier or after NOT_SERIOUS; 403 for other roles.
+    Each refusal on a real event adds one REFUSED entry (D-26); an unknown id adds none."""
     event_id = stack.breach()
     before = stack.audit(event_id)
     assert stack.report(event_id).status_code == 409
@@ -170,12 +171,13 @@ def test_refusals_write_nothing(stack):
         assert stack.report(event_id, role=role).status_code == 403
         assert stack.submit(event_id, role=role).status_code == 403
     assert stack.report(str(uuid.uuid4())).status_code == 404
-    assert stack.audit(event_id) == before
+    new = stack.audit(event_id)[len(before) :]
+    assert [e["action"] for e in new] == ["REFUSED"] * 7
 
     stack.dispose(event_id, {"tier": "NOT_SERIOUS", "rationale": "no harm", "harm_fields": ALL_NA})
     after = stack.audit(event_id)
     assert stack.report(event_id).status_code == 409
-    assert stack.audit(event_id) == after
+    assert [e["action"] for e in stack.audit(event_id)[len(after) :]] == ["REFUSED"]
     with stack.sessionmaker() as s:
         assert s.scalars(select(Report)).all() == []
 

@@ -32,6 +32,7 @@ final, because cross-team tests depend on them.
 | D-23 | Deadline details B-10 leaves open (which tier is stricter, A after NOT_SERIOUS, same tier) | Interim (team, #39); **pod** to confirm |
 | D-24 | Reminder details B-11 leaves open (catch-up, revisions, closing, payload) | Interim (team, #40); **pod** to confirm |
 | D-25 | Report details B-12 leaves open (revision after assembly, submission, audit) | Interim (team, #41); **pod** to confirm |
+| D-26 | Which refused calls the audit trail records (Model 5 Ex-4) | Interim (team, #67); **pod** to confirm |
 
 ## Agenda for the next pod meeting
 
@@ -458,8 +459,8 @@ Ex-2 disagrees with B-08.
 - **Status codes.** `401`, then `400` (body), then `403` (role), `404` (event), `409` (pending
   field or monitoring gap).
 - **Audit.** One `DISPOSITION` ledger entry per accepted call (B-14), with the tier, previous tier,
-  rationale, new state and the confirmations made in that call. Refused calls write nothing yet;
-  Ex-4 `viewer-tier` expects the refused attempt in the ledger, which is still open.
+  rationale, new state and the confirmations made in that call. A refused call changes nothing;
+  since #67 a `403`/`409` on an existing event adds one `REFUSED` entry (D-26).
 - **Not in #38.** Deadlines and the rule for revising to a less strict tier (B-10): D-23, #39.
   Reminders (B-11): #40.
 
@@ -542,10 +543,40 @@ both endpoints Phase 5; they are implemented now because they follow from #38.
   the event id.
 - **Audit (B-14).** One ledger entry per successful call: `REPORT_ASSEMBLED` (with the hash) for
   the call that assembles, `VIEW` for each later read, `REPORT_SUBMITTED` (with the note) for the
-  submission. Refused calls write nothing, which leaves Ex-4 `premature-report`'s
-  `ledger_records_attempt` open, like `viewer-tier` (D-22).
+  submission. A refused call changes nothing; since #67 a `403`/`409` on an existing event adds
+  one `REFUSED` entry (D-26).
 - **Concurrency.** The event row is locked while a report is read or changed, as for
   dispositions, so concurrent first requests assemble one report.
+
+## D-26: Refused attempts in the audit trail (REQ-13, REQ-14, B-14, Model 5 Ex-4)
+
+**Gap.** B-14 asks for one audit entry per read and per change. A refused call is neither, but
+Model 5 Ex-4 expects both `viewer-tier` (a viewer's disposition, `403`) and `premature-report`
+(a report before any disposition, `409`) in the ledger (`ledger_records_attempt`). Neither B-14
+nor Ex-4 says which other refusals count.
+
+**Interim behavior (#67; pod to confirm):**
+
+- **What is recorded.** A `403` or `409` from `POST /v1/events/{id}/disposition`,
+  `GET /v1/events/{id}/report` or `POST /v1/events/{id}/report/submission` adds exactly one
+  `REFUSED` entry for that event. It gives the caller's `actor_id` and a payload of `event_id`,
+  `operation` (the operationId), `status`, `role` and `reason`. It shows in
+  `GET /v1/events/{id}/audit` as `action = REFUSED`.
+- **What isn't.**
+  - Unknown or malformed ids (`404`, or a viewer's `403` on an id that names no event): there's
+    no event to attach an entry to, and anyone could grow the ledger with made-up ids.
+  - `400` bodies.
+  - Refusals on other endpoints. Ex-4 `viewer-denied` expects `POST /v1/webhooks` and
+    `POST /v1/metrics` to add nothing.
+- **How.** The refused call's own transaction rolls back as before, so the event, its fields and
+  its dispositions are untouched. The entry is appended afterwards, in its own transaction.
+  Recording is best effort: if it fails, the caller still gets the `403`/`409` and the failure is
+  logged.
+- **Volume.** Each recorded refusal needs a valid key and an existing event id, so repeated
+  attempts are attributable. Rate limiting is still open (HANDOFF §9).
+
+With this, `/v1/meta` lists phase 4. Ex-4 `premature-report` also expects `UNDER_REVIEW`, which
+needs a webhook to have accepted the flag notification (D-21). The live contract run has one.
 
 ## Other notes
 

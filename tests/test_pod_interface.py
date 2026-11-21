@@ -21,7 +21,7 @@ from fastapi import HTTPException, Request
 from fastapi.testclient import TestClient
 from hypothesis import HealthCheck, reject, settings
 
-from app.api.meta import INTERFACE_VERSION
+from app.api.meta import IMPLEMENTED_PHASES, INTERFACE_VERSION
 from app.core.clock import get_clock
 from app.core.config import AppEnv, Settings
 from app.db.uow import get_uow
@@ -91,10 +91,12 @@ def test_event_enums_match_the_pod_interface():
     assert "CRITICAL_INFRASTRUCTURE_OR_WIDESPREAD" in schemas["DispositionTier"]["enum"]
 
 
-def test_every_phase3_operation_is_implemented():
+@pytest.mark.parametrize("phase", IMPLEMENTED_PHASES)
+def test_every_operation_of_a_listed_phase_is_implemented(phase):
+    """/v1/meta may only list a phase whose pod-interface operations all exist."""
     app = create_app(Settings(enable_test_routes=True, app_env=AppEnv.TEST))
     ours = {(m.upper(), p) for p, item in app.openapi()["paths"].items() for m in item}
-    missing = [(m, p) for m, p, op in OPERATIONS if op["x-phase"] == 3 and (m, p) not in ours]
+    missing = [(m, p) for m, p, op in OPERATIONS if op["x-phase"] == phase and (m, p) not in ours]
     assert missing == []
 
 
@@ -105,7 +107,7 @@ def test_meta_and_me():
     client = TestClient(app)
     assert client.get("/v1/meta").json() == {
         "interface_version": INTERFACE_VERSION,
-        "phases": [3],
+        "phases": [3, 4],
         "test_routes": True,
     }
     assert client.get("/v1/me").json() == {
