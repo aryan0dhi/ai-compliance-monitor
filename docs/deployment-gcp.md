@@ -84,5 +84,6 @@ gcloud compute firewall-rules delete compliance-monitor-web
   key required). For a production deployment set `APP_ENV=production`, which disables them and
   requires https webhooks.
 - `/docs` (OpenAPI UI) is public, as in development. The API itself requires keys.
-- Not yet done: backups (the VM disk only), rate limiting, image vulnerability fixes flagged by
-  Trivy (see PR #4).
+- Not yet done: scheduled backups (only the VM disk) and rate limiting. Signals, alerts, the
+  recommended backup schedule, recovery and the release checklist are in
+  [operations.md](operations.md).
