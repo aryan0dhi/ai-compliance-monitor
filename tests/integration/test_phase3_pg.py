@@ -454,8 +454,9 @@ def test_section_6_1_demonstration_over_http(pg_sessionmaker, pg_engine, seed, m
     delivered = [json.loads(c["body"]) for c in sender.calls[1:]]  # [0] is the ping
     assert [d["event_id"] for d in delivered] == [event_id]
 
+    # D-21: the accepted flag notification put the breach under review.
     detail = client.get(f"/v1/events/{event_id}", headers=as_("viewer"))
-    assert detail.status_code == 200 and detail.json()["state"] == "FLAGGED"
+    assert detail.status_code == 200 and detail.json()["state"] == "UNDER_REVIEW"
 
     # 2. Withhold data for 3 intervals -> gap event -> webhook notification.
     clock.advance(minutes=15)
