@@ -65,7 +65,7 @@ def upgrade() -> None:
             "valid = (problem IS NULL)", name=op.f("ck_ledger_check_valid_iff_no_problem")
         ),
         sa.CheckConstraint(
-            "valid OR NOT alerted", name=op.f("ck_ledger_check_only_failures_alert")
+            "NOT (valid AND alerted)", name=op.f("ck_ledger_check_only_failures_alert")
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_ledger_check")),
     )

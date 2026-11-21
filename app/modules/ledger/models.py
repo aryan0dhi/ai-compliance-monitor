@@ -78,7 +78,7 @@ class LedgerCheck(Base):
         CheckConstraint("head_hash ~ '^[0-9a-f]{64}$'", name="head_hash_sha256"),
         # A check fails exactly when it names the problem it found.
         CheckConstraint("valid = (problem IS NULL)", name="valid_iff_no_problem"),
-        CheckConstraint("valid OR NOT alerted", name="only_failures_alert"),
+        CheckConstraint("NOT (valid AND alerted)", name="only_failures_alert"),
         Index("ix_ledger_check_checked_at", "checked_at"),
     )
 
