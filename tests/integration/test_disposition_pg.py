@@ -237,3 +237,69 @@ def test_service_confirmation_types_round_trip(stack):
         assert [(f.status, f.evidence) for f in fields] == [
             ("NOT_APPLICABLE", "n/a: " + n.value) for n in HarmFieldName
         ]
+
+
+def test_reminders_on_postgres_at_the_ac12_boundaries(stack, clock):
+    """AC-12 / B-11 with the real worker, outbox and ledger: a reminder webhook gets one
+    delivery at 50, 80 and 100 % of A..deadline and none at 49, 79 or 99 %."""
+    import json
+
+    from app.core.config import get_settings
+    from app.modules.ledger.interface import get_ledger
+    from app.modules.notifications.interface import get_notifier
+    from app.modules.notifications.models import Notification, Webhook
+    from app.modules.review.reminders import checkpoint
+    from app.modules.worker.runner import Worker
+    from tests.fakes import RecordingSender
+
+    with stack.make_uow() as uow:
+        uow.webhooks.add(
+            Webhook(
+                id=uuid.uuid4(),
+                url="https://reviewer.example/reminders",
+                event_types=["reminder"],
+                secret="s",
+                created_by=None,
+                created_at=clock.now(),
+                disabled_at=None,
+            )
+        )
+    event_id = stack.breach()
+    assert stack.dispose(event_id, {"tier": "DEATH", "harm_fields": ALL_NA}).is_success
+    a = clock.now()
+    deadline = a + timedelta(days=10)
+    sender = RecordingSender()
+    worker = Worker(
+        uow_factory=stack.make_uow,
+        ledger=get_ledger(),
+        notifier=get_notifier(),
+        sender=sender,
+        clock_provider=lambda: clock,
+        max_attempts=get_settings().webhook_max_attempts,
+    )
+
+    def reminders():
+        return [json.loads(c["body"])["reminder"]["elapsed_percent"] for c in sender.calls]
+
+    for percent, expected in [
+        (49, []),
+        (50, [50]),
+        (79, [50]),
+        (80, [50, 80]),
+        (99, [50, 80]),
+        (100, [50, 80, 100]),
+    ]:
+        clock.current = checkpoint(a, deadline, percent)
+        if percent in (49, 79, 99):
+            clock.current = checkpoint(a, deadline, percent + 1) - timedelta(seconds=1)
+        assert worker.run_once().errors == []
+        assert worker.run_once().errors == []  # a second pass at the same time adds nothing
+        assert reminders() == expected, percent
+
+    body = json.loads(sender.calls[-1]["body"])
+    assert body["event_id"] == event_id
+    assert body["reminder"]["deadline_utc"] == deadline.isoformat()
+    with stack.sessionmaker() as s:
+        rows = s.scalars(select(Notification).where(Notification.notification_type == "reminder"))
+        assert sorted(n.reminder_percent for n in rows) == [50, 80, 100]
+    assert verify_ledger(principal=user_principal(Role.VIEWER), uow=stack.make_uow()).valid

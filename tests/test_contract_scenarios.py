@@ -1,12 +1,13 @@
 """The contract suite's Phase 4 scenario handlers (tests/contract/scenarios.py), run in-process.
 
-The live suite only runs Phase 4 steps once a target's /v1/meta lists phase 4, which ours won't
-until reminders exist (#40). These tests run the same handlers now, against this app with the
-in-memory doubles and a simulated clock behind /v1/test/clock, so the handlers are known to work
-when that happens.
+The live suite only runs Phase 4 steps once a target's /v1/meta lists phase 4. These tests run
+the same handlers now, against this app with the in-memory doubles and a simulated clock behind
+/v1/test/clock, so the handlers are known to work when it does. A stand-in receiver runs the
+worker's reminder sweep and dispatch whenever the suite looks at its webhook bodies.
 """
 
 import dataclasses
+import json
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from uuid import UUID, uuid4
@@ -21,11 +22,13 @@ from app.db.uow import get_uow
 from app.main import create_app
 from app.modules.auth.interface import Principal, Role, get_principal
 from app.modules.ledger.interface import get_ledger
+from app.modules.notifications.dispatcher import dispatch_due
 from app.modules.notifications.interface import get_notifier
+from app.modules.review.reminders import sweep_reminders
 from app.modules.testing.clock import get_simulated_clock
 from tests.contract.fixtures import Scenario, load_fixtures
 from tests.contract.scenarios import ScenarioRun
-from tests.fakes import ChainLedger, FakeUnitOfWork, RecordingNotifier
+from tests.fakes import ChainLedger, FakeUnitOfWork, RecordingNotifier, RecordingSender
 
 FIXTURES = load_fixtures()
 SYSTEMS = {name: UUID(s["id"]) for name, s in FIXTURES.systems.items()}
@@ -86,7 +89,7 @@ class InProcessApi:
             return principals[key]
 
         clock = self.clock = MovableClock()
-        ledger = ChainLedger(self.uow.ledger, clock)
+        ledger = self.ledger = ChainLedger(self.uow.ledger, clock)
         app = create_app(Settings(enable_test_routes=True, app_env=AppEnv.TEST))
         app.dependency_overrides.update(
             {
@@ -110,12 +113,32 @@ class InProcessApi:
         return result
 
 
+class WorkerReceiver:
+    """A reminder webhook on the in-memory app: reading the bodies runs one worker pass."""
+
+    url = "https://receiver.example/hook"
+
+    def __init__(self, api: InProcessApi) -> None:
+        self.api, self.sender = api, RecordingSender()
+        api.uow.seed_webhook(self.url, event_types=("reminder",))
+
+    def bodies(self) -> list[dict]:
+        api = self.api
+        sweep_reminders(lambda: api.uow, clock=api.clock, max_delay=timedelta(minutes=15))
+        dispatch_due(
+            lambda: api.uow, sender=self.sender, ledger=api.ledger, clock=api.clock, max_attempts=3
+        )
+        return [json.loads(c["body"]) for c in self.sender.calls]
+
+
 NO_RECEIVER = SimpleNamespace(url=None, bodies=lambda: [])
 
 
-def run(scenario: Scenario, phases=(3, 4)) -> tuple[ScenarioRun, list[str]]:
+def run(scenario: Scenario, phases=(3, 4), *, webhooks=False) -> tuple[ScenarioRun, list[str]]:
     fixtures = dataclasses.replace(FIXTURES, scenarios={**FIXTURES.scenarios, "T": scenario})
-    runner = ScenarioRun(InProcessApi(), fixtures, "T", NO_RECEIVER, test_routes=True)
+    api = InProcessApi()
+    receiver = WorkerReceiver(api) if webhooks else NO_RECEIVER
+    runner = ScenarioRun(api, fixtures, "T", receiver, test_routes=True)
     return runner, runner.run(list(phases))
 
 
@@ -153,6 +176,23 @@ def test_ex1_confirm_assign_and_revise_with_deadlines():
     assert runner.start is not None
     a = datetime.fromisoformat(runner.history[0]["recorded_at"].replace("Z", "+00:00"))
     assert timedelta(hours=4) <= a - runner.start <= timedelta(hours=4, minutes=1)
+
+
+def test_ex1_reminders_at_50_80_and_100_percent():
+    """Model 5 Ex-1 through to d10 13:00: three reminders, one per checkpoint (AC-12)."""
+    runner, _ = run(
+        ex1_steps(
+            "breach",
+            "confirm-fields",
+            "assign-other-serious",
+            "revise-to-death",
+            "reminders",
+        ),
+        webhooks=True,
+    )
+    bodies = runner.receiver.bodies()
+    assert sorted(b["reminder"]["elapsed_percent"] for b in bodies) == [50, 80, 100]
+    assert len({b["notification_id"] for b in bodies}) == 3  # later passes add nothing
 
 
 def test_a_wrong_deadline_fails_the_step():

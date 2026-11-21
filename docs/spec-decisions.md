@@ -30,6 +30,7 @@ final, because cross-team tests depend on them.
 | D-21 | What moves a breach from `FLAGGED` to `UNDER_REVIEW` | Decided (team, 2026-11-17); **pod** to confirm |
 | D-22 | Disposition details B-08/B-09 leave open (blank rationale, history, re-confirmation, Ex-2) | Interim (team, #38); **pod** to confirm |
 | D-23 | Deadline details B-10 leaves open (which tier is stricter, A after NOT_SERIOUS, same tier) | Interim (team, #39); **pod** to confirm |
+| D-24 | Reminder details B-11 leaves open (catch-up, revisions, closing, payload) | Interim (team, #40); **pod** to confirm |
 
 ## Agenda for the next pod meeting
 
@@ -486,6 +487,29 @@ tier does. Its looser-revision sentence ("keeps the current deadline unless a ra
 - **B-15.** `detected_at` is set at flagging and nothing in review changes it.
 - **Contract suite.** Phase 4 scenario steps advance the service clock to their `at` offset
   (test routes needed) and check deadlines against it, allowing 60 s for real time spent.
+
+## D-24: Reminder details (REQ-11, B-11, AC-12)
+
+**Gaps.** B-11 says each `reminder` webhook gets exactly one delivery at 50 %, 80 % and 100 % of
+the window from `A` to `deadline_utc`. It doesn't say what happens when the deadline moves, when
+the event closes, or when several checkpoints pass at once.
+
+**Interim behavior (#40; pod to confirm):**
+
+- **Who.** Events in `DISPOSITIONED` (a serious tier). `CLOSED` events get none, including
+  later checkpoints of an event revised to `NOT_SERIOUS`.
+- **When.** The worker checks on every pass (seconds apart). A checkpoint is due when the service
+  clock reaches `A + p % × (deadline − A)`, to the microsecond. Every due checkpoint is queued in
+  order, so a worker that was down or a clock advanced past several checkpoints catches up.
+- **Revisions.** Checkpoints still to come follow the current deadline (and the same `A`). One
+  that was already queued is never sent again (`uq_notification_reminder_once`), even if the
+  revision puts it later. A stricter tier whose deadline has already passed sends the remaining
+  checkpoints at once.
+- **Delivery.** Through the outbox like flag notifications: one delivery per subscribed webhook,
+  at least once on the wire; receivers deduplicate on `notification_id`. The body carries
+  `reminder: {elapsed_percent, deadline_utc}` (pod `WebhookDelivery`), and `event` is the event
+  snapshot with `deadline_utc`. A delivered reminder adds a `NOTIFIED` ledger entry; queuing it
+  adds none, because it doesn't change the event.
 
 ## Other notes
 

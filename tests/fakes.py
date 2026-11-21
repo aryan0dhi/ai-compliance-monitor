@@ -21,7 +21,7 @@ from sqlalchemy.orm import object_mapper
 
 from app.modules.auth.models import ApiKey, AppUser
 from app.modules.auth.principal import Principal, Role
-from app.modules.events.models import OPEN_GAP_STATES, Event, EventType
+from app.modules.events.models import OPEN_GAP_STATES, Event, EventState, EventType
 from app.modules.events.repository import EventFilters
 from app.modules.ledger.chain import GENESIS_HASH, compute_entry_hash
 from app.modules.ledger.models import LedgerEntry, LedgerEntryType
@@ -136,6 +136,10 @@ class FakeEventRepository:
 
     def open_gap_for_system(self, system_id: UUID) -> Event | None:
         return next((e for e in self.open_gaps() if e.system_id == system_id), None)
+
+    def ids_in_state(self, state: EventState) -> list[UUID]:
+        found = [e for e in self.rows.values() if e.state == state]
+        return [e.id for e in sorted(found, key=lambda e: (e.detected_at, e.id))]
 
     def list(self, filters: EventFilters, *, limit: int, offset: int) -> tuple[list[Event], int]:
         matches = [
@@ -265,6 +269,13 @@ class FakeNotificationRepository:
                 due.append((d, self.rows[d.notification_id], webhook))
         due.sort(key=lambda t: (t[1].deliver_by, t[0].next_attempt_at))
         return due[:limit]
+
+    def reminder_percents(self, event_id: UUID) -> set[int]:
+        return {
+            n.reminder_percent
+            for n in self.rows.values()
+            if n.event_id == event_id and n.reminder_percent is not None
+        }
 
     def count_undelivered_due_between(self, after: datetime, until: datetime) -> int:
         delivered = {

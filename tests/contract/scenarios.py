@@ -16,9 +16,7 @@ from tests.contract.fixtures import Fixtures, Scenario, Step, parse_duration
 # Which configured key acts as each fixture system.
 SYSTEM_KEYS = {"loan-scorer": "system", "resume-ranker": "resume_ranker"}
 # Actions in the fixtures file that no handler runs yet (Phase 4/5, or covered by other tests).
-DEFERRED_ACTIONS = frozenset(
-    {"await_reminders", "get_report", "await_gap"} | {"tamper_export", "await_alert"}
-)
+DEFERRED_ACTIONS = frozenset({"get_report", "await_gap"} | {"tamper_export", "await_alert"})
 # A breach is FLAGGED until a webhook accepts its flag notification, then UNDER_REVIEW (D-21). With
 # webhooks registered that can happen within one worker pass, so a step that reads the state right
 # after the breach accepts either.
@@ -303,6 +301,31 @@ class ScenarioRun:
                 and self.event_id in (b.get("event_id"), b.get("event", {}).get("event_id"))
             ]
             assert len(reminders) == want["escalations"], reminders
+
+    def do_await_reminders(self, step: Step) -> None:
+        """B-11 / AC-12: once the clock has reached the deadline, the receiver has had exactly
+        one reminder per checkpoint (deduplicated on notification_id), each naming the deadline
+        in force, over a window of exactly window_end - window_start."""
+        expected = sorted(round(f * 100) for f in step.expect["fractions"])
+
+        def reminders():
+            seen: dict[str, dict] = {}
+            for b in self.receiver.bodies():
+                if b.get("notification_type") == "reminder" and self.event_id in (
+                    b.get("event_id"),
+                    b.get("event", {}).get("event_id"),
+                ):
+                    seen.setdefault(b["notification_id"], b)
+            return list(seen.values()) if len(seen) >= len(expected) else None
+
+        found = self.api.wait_for(reminders, f"{len(expected)} reminders for {self.event_id}")
+        assert sorted(b["reminder"]["elapsed_percent"] for b in found) == expected, found
+        assert self.history, "await_reminders needs a serious disposition first"
+        deadline = parse(self.history[-1]["deadline_utc"])
+        assert {parse(b["reminder"]["deadline_utc"]) for b in found} == {deadline}, found
+        anchor = next(parse(h["recorded_at"]) for h in self.history if h["tier"] != "NOT_SERIOUS")
+        window = parse_duration(step.args["window_end"]) - parse_duration(step.args["window_start"])
+        assert deadline - anchor == window, (anchor, deadline)
 
 
 HANDLED_ACTIONS = frozenset(
