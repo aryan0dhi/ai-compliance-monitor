@@ -333,6 +333,19 @@ class ScenarioRun:
         window = parse_duration(step.args["window_end"]) - parse_duration(step.args["window_start"])
         assert deadline - anchor == window, (anchor, deadline)
 
+    def await_state(self, want: str) -> None:
+        """The event's listed state becomes `want` within the settle time (B-21). A breach goes
+        UNDER_REVIEW when a webhook accepts its flag notification (D-21), which the worker does
+        asynchronously; without a receiver nothing is notified, so FLAGGED is accepted too."""
+        if self.receiver.url is None:
+            state = self.listed_state()
+            assert state in (want, "FLAGGED"), state
+            return
+        self.api.wait_for(
+            lambda: state_matches(want, self.listed_state()) or None,
+            f"{self.event_id} to reach {want}",
+        )
+
     def do_get_report(self, step: Step) -> None:
         """B-12 / AC-13: once a serious tier is assigned, the report of the current determination,
         the same document on every call; before that (or after NOT_SERIOUS), 409."""
@@ -345,7 +358,7 @@ class ScenarioRun:
             new = self.audit()[len(audit_before) :]
             assert len(new) == 1 and new[0]["actor_id"] == self.actor_id(key), new
         if "state" in want:
-            assert state_matches(want["state"], self.listed_state())
+            self.await_state(want["state"])
         if resp.status_code >= 400:
             assert_error_body(resp)
             return
