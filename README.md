@@ -13,12 +13,29 @@ The Phase 2 specification is the source of truth for requirements (REQ-xx), acce
 [HANDOFF.md](HANDOFF.md).** It covers the interfaces to implement, reusable functions,
 compatibility rules, testing patterns, open decisions and unverified security checks.
 
-**Status (2026-10-18):** Phase 3 scope is implemented: REQ-01, 02, 03, 04, 06, 14, the storage
-part of REQ-05 and the Phase 3 role checks of REQ-13, plus the `/v1/test/*` routes and the
-background worker. 503 tests pass against PostgreSQL 16 (95.7% line coverage), and the black-box
-contract suite passes 27/27 against a live API + worker. **Cross-team testing:** see
-[docs/cross-team-testing.md](docs/cross-team-testing.md). Several contract details still await
-pod agreement ([docs/spec-decisions.md](docs/spec-decisions.md)).
+**Status (2026-11-21):**
+
+- **Phase 3** (monitoring, notification, audit): REQ-01, 02, 03, 04, 06, 14, the storage part of
+  REQ-05 and REQ-13's role checks, plus the `/v1/test/*` routes, the background worker, opaque
+  ids, uniform error bodies (B-22) and the shared fixtures (B-20).
+- **Phase 4** (review and disposition), merged 2026-11-21:
+  - REQ-07 harm fields: #37.
+  - `UNDER_REVIEW` when the reviewer is notified: #50, D-21.
+  - REQ-08a/b and 09 dispositions and revisions: #38.
+  - REQ-10 and 15 Article 73 deadlines: #39.
+  - REQ-11 reminders at 50/80/100 %: #40.
+  - REQ-12 reports and submission: #41, Phase 5 endpoints in the pod contract.
+- **Not yet listed in `/v1/meta`.** `/v1/meta` still lists only phase 3. Model 5 Ex-4 expects
+  refused attempts (`viewer-tier`, `premature-report`) in the ledger, and nothing writes those
+  yet (D-22, D-25).
+- **Tests.** 926 pass against PostgreSQL 16 in CI, with 96 % line coverage. The black-box
+  contract suite passes 43/43 against a live API, worker and tester.
+- **Deployed** for cross-team testing at <https://34-57-175-31.sslip.io>, with the tester at
+  `/tester`. `GET /v1/meta` shows the deployed commit as `build` (#45).
+- **Open.**
+  - Cross-team runs: #43, [docs/cross-team-testing.md](docs/cross-team-testing.md).
+  - Pod agreement on the interim decisions: #42, [docs/spec-decisions.md](docs/spec-decisions.md).
+  - Phase 5: retention purge, crypto-shredding.
 
 ## Stack
 
@@ -111,11 +128,11 @@ scripts/                start-api.sh; verify_ledger_export.py (standalone ledger
 | `systems` | `monitored_system` (shared) |
 | `metrics` | REQ-01 metric ingestion, `POST /v1/metrics` |
 | `thresholds` | REQ-03 threshold config and breach detection |
-| `events` | REQ-03 event creation, REQ-05 storage, `GET /v1/events` (Phase 4 review: TBD) |
+| `events` | REQ-03 event creation, REQ-05 storage, `GET /v1/events` |
 | `review` | REQ-07 harm fields, REQ-08–10 dispositions and deadlines, REQ-11 reminders, REQ-12 reports (`/v1/events/{id}/report`) |
 | `auth` | REQ-13 API keys (hashed) and roles |
 | `ledger` | REQ-06/14 hash-chained audit ledger, `/v1/ledger/*`, `/v1/events/{id}/audit` (REQ-16: Phase 5) |
-| `notifications` | REQ-04 outbox, `POST /v1/webhooks`, delivery (REQ-11 reminders: Phase 4) |
+| `notifications` | REQ-04 outbox, `POST /v1/webhooks`, delivery (flag notifications and REQ-11 reminders) |
 | `monitoring_gaps` | REQ-02 gap detection |
 | `worker` | background loop: gap sweeps, webhook delivery, REQ-04 overdue alerts, heartbeat |
 | `testing` | `/v1/test/clock/advance`, `/v1/test/clock`, `/v1/test/reset`, baseline fixtures |
