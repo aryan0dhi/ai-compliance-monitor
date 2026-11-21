@@ -31,6 +31,54 @@ def test_upgrade_downgrade_upgrade_round_trip(postgres_server_url):
         assert version == ScriptDirectory.from_config(alembic_config(None)).get_current_head()
 
 
+def test_0007_backfills_deadlines_by_replaying_dispositions(postgres_server_url):
+    """Rows written under 0006 get the B-10 deadline in force after each of them."""
+    with throwaway_database(postgres_server_url) as engine:
+        migrate(engine, "0006")
+        event, user = uuid.uuid4(), uuid.uuid4()
+        a = T0
+        with engine.begin() as c:
+            c.execute(
+                text("INSERT INTO monitored_system (id, name) VALUES (:id, 's')"), {"id": SYS}
+            )
+            c.execute(
+                text(
+                    "INSERT INTO event (id, type, state, system_id, detected_at, retain_until,"
+                    " gap_started_at) VALUES (:id, 'monitoring_gap', 'GAP_OPEN', :s, :t, :r, :t)"
+                ),
+                {"id": event, "s": SYS, "t": T0, "r": retain_until_for(T0)},
+            )
+            c.execute(
+                text("INSERT INTO app_user (id, name, role) VALUES (:id, 'r', 'reviewer')"),
+                {"id": user},
+            )
+            rows = [  # (tier, previous, rationale, at)
+                ("NOT_SERIOUS", None, "first look", a - timedelta(days=1)),
+                ("OTHER_SERIOUS", "NOT_SERIOUS", None, a),  # A
+                ("DEATH", "OTHER_SERIOUS", None, a + timedelta(days=3)),  # stricter: A + 10
+                ("OTHER_SERIOUS", "DEATH", None, a + timedelta(days=4)),  # looser: A + 15
+                ("OTHER_SERIOUS", "OTHER_SERIOUS", None, a + timedelta(days=5)),  # same: kept
+            ]
+            for seq, (tier, prev, why, at) in enumerate(rows, start=1):
+                c.execute(
+                    text(
+                        "INSERT INTO disposition (event_id, seq, tier, previous_tier, reviewer_id,"
+                        " rationale, recorded_at) VALUES (:e, :n, :t, :p, :u, :w, :at)"
+                    ),
+                    {"e": event, "n": seq, "t": tier, "p": prev, "u": user, "w": why, "at": at},
+                )
+        migrate(engine, "0007")
+        with engine.connect() as c:
+            got = c.execute(text("SELECT deadline_utc FROM disposition ORDER BY seq")).scalars()
+            assert list(got) == [
+                None,
+                a + timedelta(days=15),
+                a + timedelta(days=10),
+                a + timedelta(days=15),
+                a + timedelta(days=15),
+            ]
+
+
 def test_models_and_migrations_have_no_drift(pg_engine):
     """The online equivalent of tests/test_migrations.py: autogenerate finds nothing to do."""
     with pg_engine.connect() as conn:
@@ -378,6 +426,7 @@ class TestDispositionConstraints:
             "reviewer_id": reviewer,
             "rationale": None,
             "recorded_at": T0,
+            "deadline_utc": T0 + timedelta(days=15),
             **values,
         }
         cols = ", ".join(row)
@@ -407,13 +456,17 @@ class TestDispositionConstraints:
             {"reviewer_id": uuid.uuid4()},  # no such user
             {"event_id": uuid.uuid4()},  # no such event
             {"recorded_at": None},
+            {"deadline_utc": None},  # a serious tier always has a deadline (B-10)
+            {"tier": "NOT_SERIOUS", "rationale": "no harm"},  # ... and NOT_SERIOUS never does
         ],
     )
     def test_invalid_rows_rejected(self, conn, event_id, reviewer, values):
         assert not self.dispose(conn, event_id, reviewer, **values)
 
     def test_not_serious_with_rationale_accepted(self, conn, event_id, reviewer):
-        assert self.dispose(conn, event_id, reviewer, tier="NOT_SERIOUS", rationale="no harm")
+        assert self.dispose(
+            conn, event_id, reviewer, tier="NOT_SERIOUS", rationale="no harm", deadline_utc=None
+        )
 
     def test_dispositioned_event_cannot_be_deleted(self, conn, event_id, reviewer):
         assert self.dispose(conn, event_id, reviewer)

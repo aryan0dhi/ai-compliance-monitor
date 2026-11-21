@@ -68,7 +68,8 @@ class RevisionOut(BaseModel):
     """One disposition in revision_history (pod interface Revision, B-09).
 
     Every disposition is listed, oldest first; the first has previous_tier null and the last is
-    the event's current tier. deadline_utc stays null until deadlines are implemented (B-10, #39).
+    the event's current tier. deadline_utc is the Article 73 deadline in force after that
+    disposition (B-10), null for NOT_SERIOUS.
     """
 
     tier: DispositionTier
@@ -86,6 +87,7 @@ class RevisionOut(BaseModel):
             reviewer_id=d.reviewer_id,
             recorded_at=d.recorded_at,
             rationale=d.rationale,
+            deadline_utc=d.deadline_utc,
         )
 
 
@@ -94,7 +96,8 @@ class EventDetail(BaseModel):
 
     harm_fields (REQ-07) holds all four Art. 3(49) fields for breach events, and is null for
     monitoring gaps (INV-12). revision_history lists every disposition (REQ-09, B-09) and is empty
-    until the first. deadline_utc is null until deadlines are implemented (REQ-10, #39).
+    until the first. deadline_utc is the latest disposition's Article 73 deadline (REQ-10, B-10):
+    null before a serious tier and for NOT_SERIOUS. detected_at never changes (REQ-15, B-15).
     """
 
     event_id: IdOut
@@ -126,6 +129,8 @@ class EventDetail(BaseModel):
         if record.harm_fields:
             detail.harm_fields = {f.name: HarmFieldOut.from_field(f) for f in record.harm_fields}
         detail.revision_history = [RevisionOut.from_disposition(d) for d in record.dispositions]
+        if record.dispositions:
+            detail.deadline_utc = record.dispositions[-1].deadline_utc
         return detail
 
     @classmethod

@@ -3,7 +3,8 @@ severity tier (REQ-07, REQ-08a/b, REQ-09, REQ-13; pod rules B-08, B-09).
 
 One call is one change to the event: the harm-field confirmations, the new disposition row, the
 state change and its single DISPOSITION ledger entry commit together or not at all (Q7.2
-Decision 1, B-14). Deadlines (B-10, #39) and reminders (B-11, #40) are not set here yet.
+Decision 1, B-14). Each disposition stores the Article 73 deadline in force after it (B-10,
+review.deadlines). Reminders (B-11, #40) are not sent yet.
 """
 
 from dataclasses import dataclass, field
@@ -17,6 +18,8 @@ from app.modules.auth.interface import Principal, Role
 from app.modules.events.models import Event, EventState, EventType
 from app.modules.events.service import EventNotFound, EventRecord
 from app.modules.ledger.interface import LedgerEntryType, LedgerWriter
+from app.modules.review.deadlines import DeadlineState, LooserTierNeedsRationale
+from app.modules.review.deadlines import apply as apply_deadline
 from app.modules.review.models import (
     Disposition,
     DispositionTier,
@@ -132,6 +135,21 @@ def record_disposition(
             )
         history = uow.dispositions.for_event(event.id)
         previous = history[-1] if history else None
+        # The stored rows give A (first serious tier) and the deadline in force; the rules
+        # (B-10) only decide the next one, so a later rule change never rewrites history.
+        state = DeadlineState(
+            tier=DispositionTier(previous.tier) if previous else None,
+            anchor=next(
+                (d.recorded_at for d in history if DispositionTier(d.tier).is_serious), None
+            ),
+            deadline=previous.deadline_utc if previous else None,
+        )
+        try:
+            after = apply_deadline(
+                state, request.tier, rationale=has_text(request.rationale), at=now
+            )
+        except LooserTierNeedsRationale as exc:
+            raise DispositionConflict(str(exc)) from exc
         disposition = Disposition(
             event_id=event.id,
             seq=previous.seq + 1 if previous else 1,
@@ -140,6 +158,7 @@ def record_disposition(
             reviewer_id=principal.actor_id,
             rationale=request.rationale,
             recorded_at=now,
+            deadline_utc=after.deadline,
         )
         uow.dispositions.add(disposition)
         event.state = (
@@ -173,6 +192,7 @@ def _ledger_payload(
         "rationale": disposition.rationale,
         "state": event.state,
         "recorded_at": _iso(disposition.recorded_at),
+        "deadline_utc": _iso(disposition.deadline_utc) if disposition.deadline_utc else None,
         "harm_fields": {
             name.value: {"status": c.status.value, "evidence": c.evidence}
             for name, c in sorted(

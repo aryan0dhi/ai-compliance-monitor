@@ -5,6 +5,7 @@ steps up to the phases it provides (GET /v1/meta); later steps are reported as d
 skipped. Supporting Phase 4 means adding handlers here, not changing the tests.
 """
 
+import math
 import time
 from datetime import UTC, datetime, timedelta
 
@@ -30,6 +31,9 @@ def state_matches(want: str, got: str) -> bool:
 
 # detected_at may differ from the service clock reads around the request by this much.
 CLOCK_TOLERANCE = timedelta(seconds=1)
+# A deadline is checked against the step's offset from the scenario start; the assignment
+# itself happens a little after the clock reaches that offset (real time keeps running).
+DEADLINE_TOLERANCE = timedelta(seconds=60)
 
 _SEQ = iter(range(1, 10**9))
 
@@ -68,6 +72,8 @@ class ScenarioRun:
         # confirm_fields steps collect here; the next disposition sends them (B-08).
         self.confirmations: dict[str, dict[str, str]] = {}
         self.history: list[dict] = []
+        # Service-clock time of the scenario's first breach; step offsets ("at") count from it.
+        self.start: datetime | None = None
 
     @property
     def system_id(self) -> str:
@@ -106,6 +112,24 @@ class ScenarioRun:
         assert page.status_code == 200, page.text
         return next(e["state"] for e in page.json()["items"] if e["event_id"] == self.event_id)
 
+    def travel_to(self, offset: timedelta) -> None:
+        """Advance the service clock to the step's offset from the start (B-10 deadlines are days
+        apart). Only Phase 4+ steps travel: Phase 3 steps wait in real time (webhook "within")."""
+        if self.start is None or offset <= timedelta(0):
+            return
+        behind = self.start + offset - self.service_now()
+        if behind <= timedelta(0):
+            return
+        if not self.test_routes:
+            pytest.fail(f"{self.scenario.name} needs POST /v1/test/clock/advance (test routes)")
+        resp = self.api.call(
+            "POST",
+            "/v1/test/clock/advance",
+            as_="admin",
+            json={"seconds": math.ceil(behind.total_seconds())},
+        )
+        assert resp.status_code == 200, resp.text
+
     def run(self, phases: list[int]) -> list[str]:
         """Run the steps this target can; returns the deferred ones as "id (phase n)"."""
         todo, deferred = self.scenario.split(phases, webhooks=self.receiver.url is not None)
@@ -115,6 +139,8 @@ class ScenarioRun:
             todo = [s for s in other.steps if s.id in setup["steps"]] + todo
         for step in todo:
             try:
+                if step.phase >= 4:
+                    self.travel_to(step.at)
                 getattr(self, f"do_{step.action}")(step)
             except AssertionError as exc:
                 raise AssertionError(f"{self.scenario.name} step {step.id}: {exc}") from exc
@@ -133,6 +159,8 @@ class ScenarioRun:
         resp = self.api.call("POST", "/v1/metrics", as_=self.key(step.actor), json=body)
         self.window = (before, self.service_now())
         self.submitted_at = time.monotonic()
+        if self.start is None:
+            self.start = before
         assert resp.status_code == step.expect["status"], resp.text
         if step.expect.get("flagged"):
             self.event_id = resp.json().get("flagged_event_id")
@@ -254,9 +282,15 @@ class ScenarioRun:
         serious = body["tier"] != "NOT_SERIOUS"
         assert event["state"] == want.get("state", "DISPOSITIONED" if serious else "CLOSED")
         if "deadline_utc" in want:
-            if want["deadline_utc"] is not None:
-                pytest.fail("Article 73 deadline checks (B-10) arrive with issue #39")
-            assert event["deadline_utc"] is None, event["deadline_utc"]
+            assert history[-1]["deadline_utc"] == event["deadline_utc"], history
+            if want["deadline_utc"] is None:
+                assert event["deadline_utc"] is None, event["deadline_utc"]
+            else:
+                # B-10: A + days(tier), A being the first serious assignment's step offset.
+                assert self.start is not None and event["deadline_utc"] is not None, event
+                expected = self.start + parse_duration(want["deadline_utc"])
+                actual = parse(event["deadline_utc"])
+                assert expected <= actual <= expected + DEADLINE_TOLERANCE, (expected, actual)
         if "dispositions" in want:
             assert len(history) == want["dispositions"], history
         if want.get("second_supersedes_first"):

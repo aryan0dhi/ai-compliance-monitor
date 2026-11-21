@@ -151,6 +151,7 @@ class TestFirstDisposition:
             "rationale": None,
             "state": "DISPOSITIONED",
             "recorded_at": clock.now().isoformat(),
+            "deadline_utc": (clock.now() + timedelta(days=15)).isoformat(),
             "harm_fields": {
                 "health_safety": {"status": "NOT_APPLICABLE", "evidence": None},
                 "critical_infrastructure": {"status": "NOT_APPLICABLE", "evidence": None},
@@ -361,7 +362,7 @@ def test_get_event_shows_the_revision_history(uow, ledger, clock, event_id, revi
             "reviewer_id": str(reviewer.actor_id),
             "recorded_at": "2026-09-27T20:01:00Z",
             "rationale": None,
-            "deadline_utc": None,
+            "deadline_utc": "2026-10-12T20:01:00Z",  # A + 15 days
         },
         {
             "tier": "DEATH",
@@ -369,7 +370,7 @@ def test_get_event_shows_the_revision_history(uow, ledger, clock, event_id, revi
             "reviewer_id": str(reviewer.actor_id),
             "recorded_at": "2026-09-30T20:01:00Z",
             "rationale": None,
-            "deadline_utc": None,
+            "deadline_utc": "2026-10-07T20:01:00Z",  # stricter: A + 10 days
         },
     ]
 
@@ -419,7 +420,7 @@ class TestHttp:
         body = resp.json()
         assert body["event_id"] == str(event_id)
         assert body["state"] == "DISPOSITIONED"
-        assert body["deadline_utc"] is None  # B-10 deadlines: #39
+        assert body["deadline_utc"] == "2026-10-12T20:01:00Z"  # B-10: A + 15 days
         rights = body["harm_fields"]["fundamental_rights"]
         assert rights["status"] == "CONFIRMED"
         assert rights["confirmed_by"] == str(reviewer.actor_id)

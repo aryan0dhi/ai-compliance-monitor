@@ -31,8 +31,8 @@ router = APIRouter(prefix="/events", tags=["review"])
         403: {"description": "Only reviewer keys record dispositions (REQ-13)"},
         404: {"description": "Unknown event_id"},
         409: {
-            "description": "A harm field is still PENDING (B-08), or the event is a monitoring "
-            "gap (INV-12)"
+            "description": "A harm field is still PENDING (B-08), a revision to a less strict "
+            "tier has no rationale (B-10), or the event is a monitoring gap (INV-12)"
         },
     },
 )
@@ -46,7 +46,7 @@ def record_disposition_route(
 ) -> EventDetail:
     """Confirm the Art. 3(49) fields and assign or revise the severity tier (REQ-08a/b, REQ-09).
 
-    A repeat call appends a revision; nothing is overwritten (B-09).
+    A repeat call appends a revision; nothing is overwritten (B-09). deadline_utc follows B-10.
     """
     try:
         # The role first, so a non-reviewer gets 403 for any id.

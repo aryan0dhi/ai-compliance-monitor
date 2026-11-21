@@ -69,7 +69,7 @@ def _create_index_statements(sql: str) -> set[str]:
 
 def test_single_head():
     heads = ScriptDirectory.from_config(_config()).get_heads()
-    assert heads == ["0006"], heads
+    assert heads == ["0007"], heads
 
 
 @pytest.fixture(scope="module")
@@ -111,6 +111,12 @@ def test_downgrade_drops_everything():
     sql = _offline_sql("downgrade", "0002:0001")
     for table in ["event", "threshold_version", "metric_sample", "monitored_system"]:
         assert f"DROP TABLE {table};" in sql
+
+
+def test_downgrade_0007_drops_the_deadline():
+    sql = _offline_sql("downgrade", "0007:0006")
+    assert "ALTER TABLE disposition DROP CONSTRAINT ck_disposition_deadline_matches_tier;" in sql
+    assert "ALTER TABLE disposition DROP COLUMN deadline_utc;" in sql
 
 
 def test_downgrade_0006_drops_disposition_and_its_ledger_type():
