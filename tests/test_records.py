@@ -16,6 +16,7 @@ from app.modules.events.service import get_event
 from app.modules.ledger.interface import LedgerEntryType
 from app.modules.records import crypto
 from app.modules.records.service import (
+    PERSONAL_FIELDS,
     erase_expired,
     erasure_due_at,
     evidence_purpose,
@@ -222,12 +223,14 @@ class TestLifecycle:
         assert ledger.calls == [
             {
                 "session": None,
-                "entry_type": LedgerEntryType.PERSONAL_DATA_ERASED,
+                "entry_type": LedgerEntryType.RECORD_ERASED,
                 "actor_id": None,
                 "payload": {
                     "event_id": str(full),
                     "retain_until": event.retain_until.isoformat(),
                     "erased_at": due.isoformat(),
+                    "trigger": "RETENTION",
+                    "erased_fields": list(PERSONAL_FIELDS),
                 },
                 "event_id": full,
             }
@@ -330,7 +333,7 @@ def test_the_worker_erases_due_events(uow, clock, ledger, full):
     clock.advance(days=400)
     result = worker.run_once()
     assert result.erasure.erased == [full] and "erasure" not in result.errors
-    erased = [e for e in uow.ledger.entries if e.entry_type == LedgerEntryType.PERSONAL_DATA_ERASED]
+    erased = [e for e in uow.ledger.entries if e.entry_type == LedgerEntryType.RECORD_ERASED]
     assert [e.event_id for e in erased] == [full]
 
 

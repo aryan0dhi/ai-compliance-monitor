@@ -16,6 +16,7 @@ to [spec-decisions.md](spec-decisions.md).
 | `0008` | `reminder_percent`, `reminder_deadline_utc` on `notification` | REQ-11 (B-11, D-24) |
 | `0012` | `record_key`; `PERSONAL_DATA_ERASED` ledger entry type; seals existing personal text | REQ-16, REQ-05 (D-28) |
 | `0013` | `event_retention_guard` trigger on `event` | REQ-05, INV-10 (#69) |
+| `0014` | `RECORD_ERASED` ledger entry type | REQ-16, contract delta A4/\u03946 (D-29) |
 
 ## Diagram
 
@@ -275,6 +276,8 @@ One row per event that holds personal data (D-28). Never deleted.
 - Erasure sets `wrapped_key` to NULL and `destroyed_at` to the service-clock time
   (`ck_record_key_destroyed_has_no_key`). The sealed tokens stay where they are and can't be
   opened any more; no row or ledger entry changes, so the chain still verifies (AC-18).
+- A reviewer can also erase on request once `retain_until` has passed
+  (`POST /v1/events/{id}/erasure`, D-29). Every erasure writes one `RECORD_ERASED` entry.
 
 ### Monitoring gaps (module `monitoring_gaps`, REQ-02) on `event`
 - `monitored_system.gap_missed_intervals` (default 3) sets the timeout per system.

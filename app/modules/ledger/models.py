@@ -34,6 +34,11 @@ class LedgerEntryType(StrEnum):
     # The event's record key was destroyed at the end of its retention period, so its personal
     # data is unreadable from now on (REQ-16, AC-18; D-28). Written by the worker (actor null).
     PERSONAL_DATA_ERASED = "PERSONAL_DATA_ERASED"
+    # An event's personal data was erased, on request (POST /v1/events/{id}/erasure) or at the
+    # end of its retention period; payload `trigger` MANUAL or RETENTION (contract delta A4,
+    # \u03946; D-29). Replaces PERSONAL_DATA_ERASED, which stays valid for entries written
+    # before migration 0014.
+    RECORD_ERASED = "RECORD_ERASED"
 
 
 class LedgerEntry(Base):

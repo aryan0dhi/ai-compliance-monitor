@@ -14,6 +14,7 @@ from app.modules.events.router import router as events_router
 from app.modules.ledger.router import router as ledger_router
 from app.modules.metrics.router import router as metrics_router
 from app.modules.notifications.router import router as notifications_router
+from app.modules.records.router import router as records_router
 from app.modules.review.router import router as review_router
 from app.modules.testing.router import router as testing_router
 
@@ -25,6 +26,7 @@ def build_router(*, include_test_routes: bool, build: str = "unknown") -> APIRou
     router.include_router(metrics_router)
     router.include_router(events_router)
     router.include_router(review_router)
+    router.include_router(records_router)
     router.include_router(ledger_router)
     router.include_router(notifications_router)
     if include_test_routes:

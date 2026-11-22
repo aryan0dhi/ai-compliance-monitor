@@ -670,6 +670,19 @@ and record it here.
 data of this event has been erased"). It is checked after the role (`403`), the body (`400`) and
 the event (`404`), and before the monitoring-gap check (the delta's `EVENT_NOT_REVIEWABLE`).
 
+**\u03946 and A4 (erasure on request, `RECORD_ERASED`), implemented.**
+- `POST /v1/events/{event_id}/erasure`: reviewer only (`403` otherwise); body empty or `{}`
+  (else `400 MALFORMED_BODY`); `404` unknown event; `409 RETENTION_NOT_EXPIRED` before
+  `retain_until`; `409 ALREADY_ERASED`. `200 {event_id, erased_at, erased_fields}`.
+- `erased_fields` (our reading; the delta gives no list) names those of `disposition.rationale`,
+  `harm_fields.evidence`, `report.document` and `report.submission_note` that held anything.
+- An event with no personal data yet gets an already-destroyed key, so it is erased too.
+- Both this and the end-of-retention job (D-28, which still waits until
+  `max(retain_until, detected_at + 6 months + 1 day)`) write one `RECORD_ERASED` ledger entry
+  with `trigger` (`MANUAL` or `RETENTION`) and `erased_fields`. Migration 0014 allows the type;
+  `PERSONAL_DATA_ERASED` stays valid for older entries.
+- Refused erasure calls are not ledgered (D-26 covers disposition and report calls only).
+
 **Open input "viewer writes", not implemented.** The delta notes that viewers may call
 `POST /v1/webhooks` and the test endpoints. Here they stay admin-only (D-13): Phase 2 §5.1 says
 viewers "can read events/audit/ledger but not write", and opening them would let a viewer send

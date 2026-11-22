@@ -20,7 +20,9 @@ from uuid import UUID
 
 from app.core.clock import Clock
 from app.core.config import AppEnv, get_settings
+from app.core.errors import ErrorCode
 from app.db.uow import UnitOfWork
+from app.modules.auth.interface import Principal, Role
 from app.modules.events.models import Event, retain_until_for
 from app.modules.ledger.interface import LedgerEntryType, LedgerWriter
 from app.modules.records.crypto import (
@@ -139,6 +141,138 @@ class ErasureResult:
     erased: list[UUID] = field(default_factory=list)
 
 
+# What erasure makes unreadable, as reported in `erased_fields` (contract delta \u03946, D-29).
+PERSONAL_FIELDS = (
+    "disposition.rationale",
+    "harm_fields.evidence",
+    "report.document",
+    "report.submission_note",
+)
+
+
+class UnknownEvent(Exception):
+    """No event with this id (404)."""
+
+
+class ErasureDenied(Exception):
+    """Only reviewers erase on request (403, contract delta \u03946)."""
+
+
+class RetentionNotExpired(Exception):
+    """A request to erase before retain_until (409 RETENTION_NOT_EXPIRED)."""
+
+    error_code = ErrorCode.RETENTION_NOT_EXPIRED
+
+
+class AlreadyErased(Exception):
+    """The event's personal data was erased already (409 ALREADY_ERASED)."""
+
+    error_code = ErrorCode.ALREADY_ERASED
+
+    def __init__(self) -> None:
+        super().__init__("the personal data of this event has been erased")
+
+
+@dataclass(frozen=True)
+class Erasure:
+    event_id: UUID
+    erased_at: datetime
+    erased_fields: list[str]
+
+
+def personal_fields_present(uow: UnitOfWork, event_id: UUID) -> list[str]:
+    """Which PERSONAL_FIELDS hold anything for this event, in PERSONAL_FIELDS order."""
+    dispositions = uow.dispositions.for_event(event_id)
+    reports = [r for d in dispositions if (r := uow.reports.get(event_id, d.seq)) is not None]
+    present = {
+        "disposition.rationale": any(d.rationale is not None for d in dispositions),
+        "harm_fields.evidence": any(
+            f.evidence is not None for f in uow.harm_fields.for_event(event_id)
+        ),
+        "report.document": bool(reports),
+        "report.submission_note": any(r.submission_note is not None for r in reports),
+    }
+    return [name for name in PERSONAL_FIELDS if present[name]]
+
+
+def _destroy(
+    uow: UnitOfWork,
+    event: Event,
+    key: RecordKey | None,
+    *,
+    now: datetime,
+    trigger: str,
+    actor_id: UUID | None,
+    ledger: LedgerWriter,
+) -> list[str]:
+    """Destroy the event's key (creating an already-destroyed one if it never had personal
+    data), with one RECORD_ERASED ledger entry. Runs in the caller's locked transaction."""
+    fields = personal_fields_present(uow, event.id)
+    if key is None:
+        uow.record_keys.add(
+            RecordKey(event_id=event.id, wrapped_key=None, created_at=now, destroyed_at=now)
+        )
+    else:
+        key.wrapped_key = None
+        key.destroyed_at = now
+    ledger.append(
+        uow.session,
+        entry_type=LedgerEntryType.RECORD_ERASED,
+        actor_id=actor_id,
+        payload={
+            "event_id": str(event.id),
+            "retain_until": event.retain_until.astimezone(UTC).isoformat(),
+            "erased_at": now.astimezone(UTC).isoformat(),
+            "trigger": trigger,
+            "erased_fields": fields,
+        },
+        event_id=event.id,
+    )
+    return fields
+
+
+def authorize_erasure(principal: Principal) -> None:
+    if principal.role is not Role.REVIEWER:
+        raise ErasureDenied(f"role {principal.role} may not erase records")
+
+
+def erase_on_request(
+    event_id: UUID,
+    *,
+    principal: Principal,
+    uow: UnitOfWork,
+    ledger: LedgerWriter,
+    clock: Clock,
+) -> Erasure:
+    """POST /v1/events/{id}/erasure (contract delta \u03946): a reviewer erases the event's
+    personal data now, once its retain_until has passed. Raises ErasureDenied (403),
+    UnknownEvent (404), AlreadyErased or RetentionNotExpired (409); nothing changes then."""
+    authorize_erasure(principal)
+    with uow:
+        event = uow.events.get_for_update(event_id)
+        if event is None:
+            raise UnknownEvent(str(event_id))
+        key = uow.record_keys.get(event_id)
+        if key is not None and key.wrapped_key is None:
+            raise AlreadyErased()
+        now = clock.now()
+        if now < event.retain_until:
+            raise RetentionNotExpired(
+                "the event is retained until "
+                f"{event.retain_until.astimezone(UTC).isoformat()} (REQ-05)"
+            )
+        fields = _destroy(
+            uow,
+            event,
+            key,
+            now=now,
+            trigger="MANUAL",
+            actor_id=principal.actor_id,
+            ledger=ledger,
+        )
+    return Erasure(event_id=event_id, erased_at=now, erased_fields=fields)
+
+
 def erase_if_due(uow: UnitOfWork, event_id: UUID, *, ledger: LedgerWriter, clock: Clock) -> bool:
     """Destroy the event's key if its erasure is due. One transaction with its ledger entry."""
     with uow:
@@ -150,19 +284,7 @@ def erase_if_due(uow: UnitOfWork, event_id: UUID, *, ledger: LedgerWriter, clock
         now = clock.now()
         if now < erasure_due_at(event):
             return False
-        key.wrapped_key = None
-        key.destroyed_at = now
-        ledger.append(
-            uow.session,
-            entry_type=LedgerEntryType.PERSONAL_DATA_ERASED,
-            actor_id=None,
-            payload={
-                "event_id": str(event.id),
-                "retain_until": event.retain_until.astimezone(UTC).isoformat(),
-                "erased_at": now.astimezone(UTC).isoformat(),
-            },
-            event_id=event.id,
-        )
+        _destroy(uow, event, key, now=now, trigger="RETENTION", actor_id=None, ledger=ledger)
     return True
 
 
