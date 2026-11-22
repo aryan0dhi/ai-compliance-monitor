@@ -35,7 +35,7 @@ final, because cross-team tests depend on them.
 | D-26 | Which refused calls the audit trail records (Model 5 Ex-4) | Interim (team, #67); **pod** to confirm |
 | D-27 | Scheduled ledger check and its alert (Model 5 Ex-5) | Interim (team, #71); **pod** to confirm the alert format |
 | D-28 | REQ-16 erasure: what is personal data, when it is erased, how reads show it | Interim (team, #70, from Phase 2 Q7.1/Q7.2); **pod** to confirm the API field |
-| D-29 | The other team's Phase 5 contract delta (`delta.md`, Δ1–Δ11, A1–A7) | Additive rows: agreed by both teams, being implemented; Change rows: awaiting instructor sign-off |
+| D-29 | The other team's Phase 5 contract delta (`delta.md`, Δ1–Δ11, A1–A7) | Agreed by both teams; implemented except \u03941/PDF (no schema) and viewer writes |
 
 ## Agenda for the next pod meeting
 
@@ -736,8 +736,10 @@ now lists both in `Allow`, taken from the API's own OpenAPI document.
 - Not changed here (\u03942 is a Change row): `GET /v1/events/{event_id}/report` still answers
   `409` after erasure and has no `format`/`X-Report-*` headers.
 
-**Change rows (\u03942, \u03949, A2, A3, A5, A6): implemented in a held PR, not merged until the
-instructor signs off.**
+**Change rows (\u03942, \u03949, A2, A3, A5, A6): implemented (#83).** Both teams agreed. Our team
+read the Phase 5 instructions as requiring instructor sign-off only for changes to the shared
+project scope; #83 was checked to leave every Phase 2 requirement and acceptance criterion
+unchanged (scope check on the PR) and merged on that basis.
 - \u03942 `GET /v1/events/{event_id}/report`: `409 NO_DISPOSITION` before any disposition;
   `410 RECORD_ERASED` after erasure (was `409`); `ETag`, `X-Report-Id`, `X-Report-Version`
   (the disposition number) and `X-Report-Sha256` on `200` (also on `GET /v1/reports/{id}`);

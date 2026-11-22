@@ -235,9 +235,9 @@ paths:
       description: |
         Reviewer keys only (REQ-13). `409 NO_DISPOSITION` while the event has no disposition
         (REQ-08a), `409` while its current tier isn't serious; the same bytes are returned on
-        every call once assembled (B-12). **Proposed, Change row awaiting instructor sign-off**
-        (contract delta \u03942, D-29): `format=json|pdf`, the `ETag`/`X-Report-*` headers,
-        `410 RECORD_ERASED` after erasure. `format=pdf` is not implemented here yet (`501`).
+        every call once assembled (B-12). Contract delta \u03942 (agreed, D-29): `format=json|pdf`,
+        the `ETag`/`X-Report-*` headers, `410 RECORD_ERASED` after erasure. `format=pdf` is not
+        implemented here yet (`501`).
       x-phase: 5
       x-reqs: [REQ-08a, REQ-12, REQ-13]
       parameters:
