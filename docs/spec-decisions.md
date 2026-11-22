@@ -782,3 +782,18 @@ Until then `GET /v1/events/{event_id}/report` serves the D-25 document.
   `tests/test_report_schema.py` validates served reports against it, plus the ordering
   `detected_at < determined_at < assembled_at` that JSON Schema can't express. Those tests are
   strict expected failures until the report follows the schema.
+- **Article 73 template (`article73_template`).** The field list is the Commission's own template,
+  "Incident Report for Serious Incidents under the AI Act (High-risk AI systems)", version 1.0.0,
+  SB-10407, published with the draft Article 73 guidance (consultation of 26 September 2025;
+  [PDF](https://ec.europa.eu/newsroom/dae/redirection/document/119623)). Every section, group
+  and field is listed in template order under the template's own numbering
+  (`app/modules/review/article73.py`). The service fills only what it holds:
+  - 1.2.c detection time: `mapped`;
+  - 1.2.d awareness date (the first serious determination): `derivable`;
+  - 1.2.g classification: `derivable`, from the tier and the CONFIRMED harm fields, when that's
+    unambiguous;
+  - 2.2.a system name: `derivable`.
+
+  Contact, address and product details are `not_available`. Everything that needs judgement is
+  `requires_reviewer_input`. 4.2.b (the not-reportable rationale) is `not_available`, because
+  NOT_SERIOUS events have no report here.
