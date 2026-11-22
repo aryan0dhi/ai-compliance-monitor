@@ -18,9 +18,9 @@ This page covers both directions and is where the results go.
 
 | Item | Value |
 |---|---|
-| Base URL | *to be filled in after the test deployment* |
+| Base URL | <https://34-57-175-31.sslip.io> (`GET /v1/meta` shows the deployed commit as `build`) |
 | Contract | Phase 2 Section 5 (`/v1`), plus the interim choices in [spec-decisions.md](spec-decisions.md) |
-| Keys | One `system` key per baseline system, one `viewer`, one `admin` (sent privately, never in git) |
+| Keys | One `system` key per baseline system, one `viewer`, one `reviewer`, one `admin` (`issue-keys.sh`; sent privately, never in git) |
 | Interactive docs | `<base URL>/docs` (OpenAPI; use "Authorize" with `Bearer <key>`) |
 
 Every request needs `Authorization: Bearer <api_key>`. A missing or unknown key gets `401`. A
@@ -30,6 +30,7 @@ key with the wrong role gets `403`.
 |---|---|
 | `system` | `POST /v1/metrics` for its own `system_id` only |
 | `viewer`, `reviewer` | `GET /v1/events`, `GET /v1/events/{id}`, `GET /v1/events/{id}/audit`, `GET /v1/ledger/*` |
+| `reviewer` only | `POST /v1/events/{id}/disposition`, `GET /v1/events/{id}/report`, `POST /v1/events/{id}/report/submission` (D-22, D-25) |
 | `admin` | all reads, plus `POST /v1/webhooks` and `/v1/test/*` (D-13) |
 
 ### Baseline fixtures (after `POST /v1/test/reset`)
