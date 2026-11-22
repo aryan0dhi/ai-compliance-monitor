@@ -498,6 +498,7 @@ class TestReportConstraints:
 
     def report(self, conn, event, reviewer, **values) -> bool:
         row = {
+            "id": uuid.uuid4(),  # report_id, contract delta \u03944 (migration 0017)
             "event_id": event,
             "disposition_seq": 1,
             "document": "{}",

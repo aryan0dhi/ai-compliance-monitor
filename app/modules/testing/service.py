@@ -22,6 +22,7 @@ RESET_TABLES = (
     "webhook",
     "ledger_entry",
     "ledger_check",
+    "report_submission",
     "report",
     "disposition",
     "harm_field",

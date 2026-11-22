@@ -24,12 +24,19 @@ from app.modules.review.models import Disposition, HarmField, Report
 from tests.conftest import T0
 from tests.fakes import user_principal
 from tests.integration.conftest import migrate, throwaway_database
-from tests.integration.test_report_pg import EX1_FIELDS, clock, stack  # noqa: F401 - fixtures
+from tests.integration.test_report_pg import (  # noqa: F401 - fixtures
+    EX1_FIELDS,
+    clock,
+    stack,
+    submission_body,
+)
 
 RATIONALE = "spoke with the applicant, Ms Example, on 2026-09-28"
 EVIDENCE = "applicant Mr Sample was refused credit twice"
+# A Phase 4 submission note (POST .../report/submission no longer takes one since contract
+# delta \u03943); only the 0012 migration test still writes one, straight into the table.
 NOTE = "submitted by J. Doe via the authority's portal"
-SECRETS = (RATIONALE, EVIDENCE, NOTE)
+SECRETS = (RATIONALE, EVIDENCE)
 FIELDS = {**EX1_FIELDS, "fundamental_rights": {"status": "CONFIRMED", "evidence": EVIDENCE}}
 
 
@@ -47,7 +54,8 @@ def full_event(stack) -> str:  # noqa: F811
         event_id, {"tier": "OTHER_SERIOUS", "rationale": RATIONALE, "harm_fields": FIELDS}
     )
     assert stack.report(event_id).status_code == 200
-    assert stack.submit(event_id, json={"note": NOTE}).status_code == 200
+    body = submission_body(stack, event_id, authority_reference="MSA-2026-0042")
+    assert stack.submit(event_id, json=body).status_code == 201
     return event_id
 
 
@@ -62,7 +70,7 @@ def test_ac18_erasure_keeps_every_hash_and_the_chain_verifies(stack, clock):  # 
     with stack.sessionmaker() as s:
         before = [(e.seq, e.entry_hash, e.payload) for e in s.scalars(select(LedgerEntry))]
         assert all(is_token(v) for v in s.scalars(select(Disposition.rationale)))
-        assert is_token(s.scalars(select(Report.submission_note)).one())
+        assert is_token(s.scalars(select(Report.document)).one())
 
     # AC-18: past retention, the worker's job destroys the key.
     with stack.make_uow() as uow:
@@ -159,14 +167,15 @@ def test_0012_seals_existing_rows_and_downgrade_opens_them(scratch_db, monkeypat
     body = {"tier": "OTHER_SERIOUS", "rationale": RATIONALE, "harm_fields": FIELDS}
     assert call("POST", f"/v1/events/{event_id}/disposition", "reviewer", json=body).is_success
     report = call("GET", f"/v1/events/{event_id}/report", "reviewer")
-    assert call(
-        "POST", f"/v1/events/{event_id}/report/submission", "reviewer", json={"note": NOTE}
-    ).is_success
 
     migrate(scratch_db, "0011", downgrade=True)
-    with scratch_db.connect() as conn:
+    with scratch_db.begin() as conn:
         assert conn.execute(text("SELECT rationale FROM disposition")).scalar_one() == RATIONALE
-        assert conn.execute(text("SELECT submission_note FROM report")).scalar_one() == NOTE
+        # A Phase 4 submission with a note, as rows written before 0012 could hold.
+        conn.execute(
+            text("UPDATE report SET submitted_at = now(), submitted_by = :u, submission_note = :n"),
+            {"u": keys["reviewer"].user_id, "n": NOTE},
+        )
         assert (
             conn.execute(
                 text("SELECT evidence FROM harm_field WHERE name = 'fundamental_rights'")
@@ -175,10 +184,13 @@ def test_0012_seals_existing_rows_and_downgrade_opens_them(scratch_db, monkeypat
         )
         assert conn.execute(text("SELECT to_regclass('record_key')")).scalar_one() is None
 
-    migrate(scratch_db)
+    migrate(scratch_db)  # 0012 seals the rows, 0017 gives the existing report an id
     dump = everything_in_the_database(sessionmaker)
-    for secret in SECRETS:
+    for secret in (*SECRETS, NOTE):
         assert secret not in dump, secret
+    with sessionmaker() as s:
+        row = s.scalars(select(Report)).one()
+        assert row.id is not None and is_token(row.submission_note)
     with sessionmaker() as s:
         assert s.scalars(select(RecordKey.event_id)).all() == [uuid.UUID(event_id)]
         assert all(is_token(f.evidence) for f in s.scalars(select(HarmField)) if f.evidence)
@@ -220,7 +232,6 @@ def test_delta6_erasure_on_request_on_postgres(stack, clock):  # noqa: F811
         "disposition.rationale",
         "harm_fields.evidence",
         "report.document",
-        "report.submission_note",
     ]
     again = stack.call("POST", f"/v1/events/{event_id}/erasure", "reviewer")
     assert again.status_code == 409 and again.json()["error_code"] == "ALREADY_ERASED"

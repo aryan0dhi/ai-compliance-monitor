@@ -8,17 +8,17 @@ bytes before them never change.
 
 import hashlib
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from app.core.types import IdOut, UtcDatetime
+from app.core.types import IdOut, OpaqueId, UtcDatetime
 from app.modules.events.schemas import EventDetail, HarmFieldOut
 from app.modules.events.service import EventRecord
-from app.modules.review.models import DispositionTier
+from app.modules.review.models import DispositionTier, ReportSubmission, ReportType, SubmissionKind
 
-NOTE_MAX_LENGTH = 2000
+AUTHORITY_REFERENCE_MAX_LENGTH = 200
 
 
 class DeterminationOut(BaseModel):
@@ -57,6 +57,7 @@ class RevealedReport:
     """A stored report with its sealed text opened (REQ-16): what the routes serve. The report
     row itself holds the document and note sealed with the event's key."""
 
+    report_id: UUID
     event_id: UUID
     disposition_seq: int
     document: str
@@ -69,7 +70,55 @@ class RevealedReport:
 
 
 class ReportSubmissionIn(BaseModel):
-    note: str | None = Field(None, max_length=NOTE_MAX_LENGTH)
+    """Contract delta \u03943. `json_sha256` must be the version's `report_sha256`."""
+
+    report_id: OpaqueId
+    json_sha256: str = Field(pattern="^[0-9a-f]{64}$")
+    report_type: ReportType
+    expected_next_report_date: date | None = None
+    authority_reference: str | None = Field(
+        None, min_length=1, max_length=AUTHORITY_REFERENCE_MAX_LENGTH
+    )
+
+
+class SubmissionOut(BaseModel):
+    submission_id: IdOut
+    report_id: IdOut
+    event_id: IdOut
+    submitted_by: IdOut
+    submitted_at: UtcDatetime
+    submission_kind: SubmissionKind
+    report_type: ReportType
+    expected_next_report_date: date | None
+    authority_reference: str | None
+
+    @classmethod
+    def from_submission(cls, s: ReportSubmission) -> "SubmissionOut":
+        return cls(
+            submission_id=s.id,
+            report_id=s.report_id,
+            event_id=s.event_id,
+            submitted_by=s.submitted_by,
+            submitted_at=s.submitted_at,
+            submission_kind=SubmissionKind(s.submission_kind),
+            report_type=ReportType(s.report_type),
+            expected_next_report_date=s.expected_next_report_date,
+            authority_reference=s.authority_reference,
+        )
+
+
+class ReportVersionOut(BaseModel):
+    """One stored report version in GET /v1/events/{id}/reports (contract delta \u03944). The
+    delta names only `status`; the other fields are ours (D-29)."""
+
+    report_id: IdOut
+    event_id: IdOut
+    # The disposition it was assembled from (its version number).
+    report_version: int
+    status: str
+    assembled_at: UtcDatetime
+    report_sha256: str
+    submitted_at: UtcDatetime | None
 
 
 def assemble_document(record: EventRecord, *, assembled_at: datetime) -> str:

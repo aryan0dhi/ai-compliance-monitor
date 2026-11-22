@@ -74,7 +74,7 @@ def _create_index_statements(sql: str) -> set[str]:
 
 def test_single_head():
     heads = ScriptDirectory.from_config(_config()).get_heads()
-    assert heads == ["0016"], heads
+    assert heads == ["0017"], heads
 
 
 @pytest.fixture(scope="module")
@@ -116,6 +116,15 @@ def test_downgrade_drops_everything():
     sql = _offline_sql("downgrade", "0002:0001")
     for table in ["event", "threshold_version", "metric_sample", "monitored_system"]:
         assert f"DROP TABLE {table};" in sql
+
+
+def test_0017_adds_report_ids_and_report_submission():
+    up = _offline_sql("upgrade", "0016:0017")
+    assert "ALTER TABLE report ADD COLUMN id UUID" in up
+    assert "CREATE TABLE report_submission" in up
+    down = _offline_sql("downgrade", "0017:0016")
+    assert "DROP TABLE report_submission;" in down
+    assert "ALTER TABLE report DROP COLUMN id;" in down
 
 
 def test_0016_adds_verification_trigger_head_check_and_reset_counter():
