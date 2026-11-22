@@ -10,6 +10,8 @@ and how to roll out a new release. Deployment mechanics are in
 | Signal | Where | Healthy | Act when |
 |---|---|---|---|
 | Database reachable | `GET /healthz` → `database` | `ok` (HTTP 200) | `503` |
+| Last ledger verification | `GET /healthz` → `last_verification`, `last_verification_age_seconds`; `GET /v1/ledger/verifications` | `valid: true`, age under a day | `valid: false`, or age over a day (worker not checking) |
+| Release and test resets | `GET /healthz` → `version` (`APP_VERSION`), `reset_count` | expected release | unexpected resets during a test run |
 | Worker alive | `GET /healthz` → `worker` | `ok` | `stale` or `missing`: `sudo docker compose restart worker` |
 | Late reviewer notifications (REQ-04) | worker log `REQ-04: … passed their maximum delay` | absent | present: is a webhook registered and reachable? |
 | Ledger integrity (REQ-06) | `ledger_alert` webhook, worker log at `CRITICAL`, `ledger_check` table | latest row `valid = true` | any failure: see §4 |

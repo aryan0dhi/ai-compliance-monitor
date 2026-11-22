@@ -160,6 +160,13 @@ class TestErrorShapes:
         state["principal"] = user_principal(Role.VIEWER)
         check(client.delete("/v1/events"), 405)
 
+    def test_405_lists_every_method_of_a_shared_path(self, env):
+        """GET and POST /v1/ledger/verifications are separate routes; Allow names both."""
+        client, state = env
+        state["principal"] = user_principal(Role.VIEWER)
+        resp = check(client.delete("/v1/ledger/verifications"), 405)
+        assert resp.headers["allow"] == "GET, POST"
+
     def test_409_conflicting_duplicate(self, env):
         client, _ = env
         assert client.post("/v1/metrics", json=VALID_METRIC).status_code == 201

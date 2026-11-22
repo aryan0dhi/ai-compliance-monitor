@@ -52,6 +52,10 @@ class LedgerCheckRepository(Protocol):
         """The most recent check that passed: the head later checks compare against."""
         ...
 
+    def newest_first(self) -> list[LedgerCheck]:
+        """Every check, newest first (GET /v1/ledger/verifications)."""
+        ...
+
 
 class SqlLedgerCheckRepository:
     def __init__(self, session: Session) -> None:
@@ -73,3 +77,7 @@ class SqlLedgerCheckRepository:
             .limit(1)
         )
         return self._session.scalars(stmt).first()
+
+    def newest_first(self) -> list[LedgerCheck]:
+        stmt = select(LedgerCheck).order_by(LedgerCheck.checked_at.desc(), LedgerCheck.id)
+        return list(self._session.scalars(stmt))

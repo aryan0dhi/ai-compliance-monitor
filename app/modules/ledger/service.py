@@ -8,12 +8,16 @@ verification pass (docs/spec-decisions.md D-14).
 import logging
 from collections.abc import Iterator
 from dataclasses import dataclass
+from datetime import timedelta
 from uuid import UUID
 
+from app.core.clock import Clock
 from app.db.uow import UnitOfWork
-from app.modules.auth.principal import READER_ROLES, Principal
+from app.modules.auth.principal import READER_ROLES, Principal, Role
 from app.modules.ledger.chain import VerifyResult, verify_chain
-from app.modules.ledger.models import LedgerEntry
+from app.modules.ledger.checks import run_ledger_check
+from app.modules.ledger.models import LedgerCheck, LedgerEntry, VerificationTrigger
+from app.modules.notifications.outbox import notify_max_delay
 
 logger = logging.getLogger(__name__)
 
@@ -79,3 +83,38 @@ def event_audit(event_id: UUID, *, principal: Principal, uow: UnitOfWork) -> lis
         if uow.events.get(event_id) is None:
             raise AuditEventNotFound(str(event_id))
         return uow.ledger.for_event(event_id)
+
+
+# --- verification runs (contract delta \u03945; D-29) -----------------------------------------
+
+# Who may start a run on request; reading runs is open to every reader role.
+VERIFICATION_RUNNERS = frozenset({Role.REVIEWER})
+
+
+class VerificationRunDenied(Exception):
+    """Only reviewers start a verification run (403)."""
+
+
+def list_verifications(*, principal: Principal, uow: UnitOfWork) -> list[LedgerCheck]:
+    """GET /v1/ledger/verifications: every run, scheduled or manual, newest first."""
+    _require_reader(principal)
+    with uow:
+        return uow.ledger_checks.newest_first()
+
+
+def run_verification(*, principal: Principal, uow: UnitOfWork, clock: Clock) -> LedgerCheck:
+    """POST /v1/ledger/verifications: verify the whole chain now and record it as a MANUAL run.
+    A failure alerts exactly as a scheduled run does (D-27)."""
+    if principal.role not in VERIFICATION_RUNNERS:
+        raise VerificationRunDenied(f"role {principal.role} may not start a verification")
+    result = run_ledger_check(
+        uow,
+        clock=clock,
+        interval=timedelta(0),
+        max_delay=notify_max_delay(),
+        force=True,
+        trigger=VerificationTrigger.MANUAL,
+    )
+    if result is None:  # pragma: no cover - force always runs
+        raise RuntimeError("a forced verification always runs")
+    return result.check

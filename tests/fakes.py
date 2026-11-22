@@ -199,6 +199,9 @@ class FakeLedgerCheckRepository:
     def latest_valid(self) -> LedgerCheck | None:
         return max((c for c in self.rows if c.valid), key=lambda c: c.checked_at, default=None)
 
+    def newest_first(self) -> list[LedgerCheck]:
+        return sorted(self.rows, key=lambda c: (-c.checked_at.timestamp(), str(c.id)))
+
 
 class FakeReportRepository:
     def __init__(self) -> None:

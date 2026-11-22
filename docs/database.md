@@ -18,6 +18,7 @@ to [spec-decisions.md](spec-decisions.md).
 | `0013` | `event_retention_guard` trigger on `event` | REQ-05, INV-10 (#69) |
 | `0014` | `RECORD_ERASED` ledger entry type | REQ-16, contract delta A4/\u03946 (D-29) |
 | `0015` | `WEBHOOK_REGISTERED` ledger entry type | REQ-14, contract delta \u03948 (D-29) |
+| `0016` | `trigger`, `head_check` on `ledger_check`; `reset_counter` | REQ-06, contract delta \u03945/A1 (D-29) |
 
 ## Diagram
 

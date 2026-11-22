@@ -11,7 +11,7 @@ from app.modules.auth.models import AppUser
 from app.modules.systems.models import MonitoredSystem
 from app.modules.systems.service import harm_field_values
 from app.modules.testing.fixtures import FIXTURE_VALID_FROM, baseline_systems
-from app.modules.testing.models import SimulatedClockState
+from app.modules.testing.models import ResetCounter, SimulatedClockState
 from app.modules.thresholds.models import ThresholdVersion
 
 # Every table holding events, metrics, notifications or their audit trail. Accounts and API keys
@@ -87,4 +87,11 @@ def reset_test_environment(uow: UnitOfWork) -> None:
             )
         )
         session.execute(delete(SimulatedClockState))
+        # Contract delta A1/A6: /healthz reports how many resets ran; the count survives them.
+        counter = insert(ResetCounter).values(id=1, resets=1)
+        session.execute(
+            counter.on_conflict_do_update(
+                index_elements=["id"], set_={"resets": ResetCounter.resets + 1}
+            )
+        )
         session.flush()

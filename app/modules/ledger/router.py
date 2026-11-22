@@ -4,15 +4,24 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from app.core.clock import Clock, get_clock
 from app.core.types import INTEGER_QUERY, to_internal_id
 from app.db.uow import UnitOfWork, get_uow
 from app.modules.auth.interface import Principal, get_principal
-from app.modules.ledger.schemas import AuditEntryOut, LedgerExportOut, LedgerVerifyOut
+from app.modules.ledger.schemas import (
+    AuditEntryOut,
+    LedgerExportOut,
+    LedgerVerifyOut,
+    VerificationRunOut,
+)
 from app.modules.ledger.service import (
     AuditEventNotFound,
     LedgerAccessDenied,
+    VerificationRunDenied,
     event_audit,
     export_ledger,
+    list_verifications,
+    run_verification,
     verify_ledger,
 )
 
@@ -45,6 +54,49 @@ def export_route(
     except LedgerAccessDenied as exc:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
     return LedgerExportOut.from_page(page)
+
+
+@router.get(
+    "/ledger/verifications",
+    response_model=list[VerificationRunOut],
+    operation_id="listVerifications",
+    responses=_READ_ERRORS,
+)
+def list_verifications_route(
+    principal: Principal = Depends(get_principal),
+    uow: UnitOfWork = Depends(get_uow),
+) -> list[VerificationRunOut]:
+    """Every ledger verification run, scheduled or manual, newest first (contract delta
+    \u03945). A bare array, like the audit trail."""
+    try:
+        checks = list_verifications(principal=principal, uow=uow)
+    except LedgerAccessDenied as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    return [VerificationRunOut.from_check(c) for c in checks]
+
+
+@router.post(
+    "/ledger/verifications",
+    status_code=status.HTTP_201_CREATED,
+    response_model=VerificationRunOut,
+    operation_id="runVerification",
+    responses={
+        401: {"description": "Missing or invalid API key"},
+        403: {"description": "Only reviewer keys start a verification run"},
+    },
+)
+def run_verification_route(
+    principal: Principal = Depends(get_principal),
+    uow: UnitOfWork = Depends(get_uow),
+    clock: Clock = Depends(get_clock),
+) -> VerificationRunOut:
+    """Verify the whole chain now (trigger MANUAL), as the daily check does (contract delta
+    \u03945; REQ-06). A failed run alerts like a scheduled one (D-27)."""
+    try:
+        check = run_verification(principal=principal, uow=uow, clock=clock)
+    except VerificationRunDenied as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    return VerificationRunOut.from_check(check)
 
 
 @router.get("/ledger/verify", response_model=LedgerVerifyOut, responses=_READ_ERRORS)

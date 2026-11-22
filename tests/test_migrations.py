@@ -74,7 +74,7 @@ def _create_index_statements(sql: str) -> set[str]:
 
 def test_single_head():
     heads = ScriptDirectory.from_config(_config()).get_heads()
-    assert heads == ["0015"], heads
+    assert heads == ["0016"], heads
 
 
 @pytest.fixture(scope="module")
@@ -116,6 +116,15 @@ def test_downgrade_drops_everything():
     sql = _offline_sql("downgrade", "0002:0001")
     for table in ["event", "threshold_version", "metric_sample", "monitored_system"]:
         assert f"DROP TABLE {table};" in sql
+
+
+def test_0016_adds_verification_trigger_head_check_and_reset_counter():
+    up = _offline_sql("upgrade", "0015:0016")
+    assert "ALTER TABLE ledger_check ADD COLUMN trigger" in up
+    assert "CREATE TABLE reset_counter" in up
+    down = _offline_sql("downgrade", "0016:0015")
+    assert "DROP TABLE reset_counter;" in down
+    assert "ALTER TABLE ledger_check DROP COLUMN head_check;" in down
 
 
 def test_0015_adds_the_webhook_registered_entry_type():
