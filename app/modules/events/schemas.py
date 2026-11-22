@@ -51,14 +51,18 @@ class HarmFieldOut(BaseModel):
 
     status: HarmFieldStatus
     prefill_evidence: str | None
+    # The reviewer's evidence when confirming (contract delta A5); null once erased (REQ-16).
+    evidence: str | None = None
     confirmed_by: IdOut | None
     confirmed_at: UtcDatetime | None
 
     @classmethod
-    def from_field(cls, f: HarmField) -> "HarmFieldOut":
+    def from_field(cls, f: HarmField, evidence: str | None = None) -> "HarmFieldOut":
+        """`evidence` is the plaintext; the stored one is sealed (REQ-16)."""
         return cls(
             status=HarmFieldStatus(f.status),
             prefill_evidence=f.prefill_evidence,
+            evidence=evidence,
             confirmed_by=f.confirmed_by,
             confirmed_at=f.confirmed_at,
         )
@@ -131,7 +135,10 @@ class EventDetail(BaseModel):
     def from_record(cls, record: EventRecord) -> "EventDetail":
         detail = cls.from_event(record.event)
         if record.harm_fields:
-            detail.harm_fields = {f.name: HarmFieldOut.from_field(f) for f in record.harm_fields}
+            detail.harm_fields = {
+                f.name: HarmFieldOut.from_field(f, record.evidence.get(f.name))
+                for f in record.harm_fields
+            }
         detail.revision_history = [
             RevisionOut.from_disposition(d, record.rationales.get(d.seq))
             for d in record.dispositions

@@ -3,7 +3,8 @@
 - Each event has a random 256-bit data key. It is stored only wrapped (AES-256-GCM) by the master
   key from RECORD_KEY_MASTER_KEY, never in clear.
 - A personal-data value is sealed with the event's data key (AES-256-GCM) into a text token
-  `enc:v1:<base64url(nonce || ciphertext)>`. The token is what the database column and the ledger
+  `pd1:<base64url(nonce || ciphertext)>` (contract delta A3). Tokens written before it use
+  `enc:v1:` and still open. The token is what the database column and the ledger
   payload hold, so ledger hashes are over ciphertext and survive the key's destruction.
 - The associated data binds a token to its event and purpose, so a token copied into another
   event or field fails to open instead of showing the wrong text.
@@ -18,7 +19,9 @@ from uuid import UUID
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-SEALED_PREFIX = "enc:v1:"
+SEALED_PREFIX = "pd1:"
+# Tokens sealed before contract delta A3; read, never written.
+LEGACY_SEALED_PREFIX = "enc:v1:"
 KEY_BYTES = 32
 _NONCE_BYTES = 12
 
@@ -72,7 +75,7 @@ def _field_aad(event_id: UUID, purpose: str) -> bytes:
 
 
 def is_token(value: str | None) -> bool:
-    return value is not None and value.startswith(SEALED_PREFIX)
+    return value is not None and value.startswith((SEALED_PREFIX, LEGACY_SEALED_PREFIX))
 
 
 def seal(data_key: bytes, event_id: UUID, purpose: str, plaintext: str) -> str:
@@ -87,7 +90,8 @@ def open_token(data_key: bytes, event_id: UUID, purpose: str, token: str) -> str
     if not is_token(token):
         raise RecordKeyError("not a sealed value")
     try:
-        raw = base64.urlsafe_b64decode(token[len(SEALED_PREFIX) :].encode("ascii"))
+        prefix = SEALED_PREFIX if token.startswith(SEALED_PREFIX) else LEGACY_SEALED_PREFIX
+        raw = base64.urlsafe_b64decode(token[len(prefix) :].encode("ascii"))
         plaintext = AESGCM(data_key).decrypt(
             raw[:_NONCE_BYTES], raw[_NONCE_BYTES:], _field_aad(event_id, purpose)
         )

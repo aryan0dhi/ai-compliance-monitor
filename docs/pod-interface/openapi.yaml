@@ -233,20 +233,35 @@ paths:
       operationId: getReport
       summary: Submission-ready Article 73 report
       description: |
-        Reviewer keys only (REQ-13). `409` while the event has no serious-tier disposition
-        (REQ-08a); the same bytes are returned on every call once assembled (B-12).
+        Reviewer keys only (REQ-13). `409 NO_DISPOSITION` while the event has no disposition
+        (REQ-08a), `409` while its current tier isn't serious; the same bytes are returned on
+        every call once assembled (B-12). **Proposed, Change row awaiting instructor sign-off**
+        (contract delta \u03942, D-29): `format=json|pdf`, the `ETag`/`X-Report-*` headers,
+        `410 RECORD_ERASED` after erasure. `format=pdf` is not implemented here yet (`501`).
       x-phase: 5
       x-reqs: [REQ-08a, REQ-12, REQ-13]
+      parameters:
+        - name: format
+          in: query
+          required: false
+          schema: { type: string, enum: [json, pdf], default: json }
       responses:
         "200":
           description: The report
+          headers:
+            ETag: { schema: { type: string } }
+            X-Report-Id: { schema: { type: string } }
+            X-Report-Version: { schema: { type: string } }
+            X-Report-Sha256: { schema: { type: string } }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Report" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "410": { $ref: "#/components/responses/Gone" }
 
   /v1/events/{event_id}/report/submission:
     parameters:

@@ -8,6 +8,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field, StrictFloat, StrictInt, field_validator
 
 from app.core.types import (
+    LATEST_ACCEPTED_TIME,
     METRIC_NAME_PATTERN,
     IdOut,
     IsoAwareDatetime,
@@ -47,9 +48,12 @@ class MetricSampleIn(BaseModel):
     @classmethod
     def _to_utc(cls, v: datetime) -> datetime:
         try:
-            return v.astimezone(UTC)
+            utc = v.astimezone(UTC)
         except OverflowError as exc:
             raise ValueError("timestamp is out of range") from exc
+        if utc >= LATEST_ACCEPTED_TIME:  # contract delta A2
+            raise ValueError("timestamp must be before 9999-07-01T00:00:00Z")
+        return utc
 
     def to_submission(self) -> MetricSubmission:
         """Call after `authorize_submission`, which guarantees system_id is a canonical UUID."""

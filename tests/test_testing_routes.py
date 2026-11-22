@@ -122,3 +122,15 @@ def test_reset_service_refuses_when_test_routes_are_off(monkeypatch):
     monkeypatch.setattr(service, "get_settings", lambda: Settings(enable_test_routes=False))
     with pytest.raises(ResetNotAllowed):
         reset_test_environment(FakeUnitOfWork())
+
+
+def test_clock_advance_stops_before_july_9999(api):
+    """Contract delta Δ9 (D-29): 400 if the simulated time would reach 9999-07-01T00:00:00Z."""
+    client, clock, _ = api
+    clock.offset = int((datetime(9999, 6, 30, tzinfo=UTC) - REAL_NOW).total_seconds())
+    day = 24 * 3600
+    resp = client.post("/v1/test/clock/advance", json={"seconds": day})
+    assert resp.status_code == 400
+    assert resp.json()["error_code"] == "MALFORMED_BODY"
+    assert "9999-07-01" in resp.json()["message"]
+    assert client.post("/v1/test/clock/advance", json={"seconds": day - 1}).status_code == 200

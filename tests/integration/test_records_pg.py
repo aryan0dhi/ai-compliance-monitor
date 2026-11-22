@@ -92,7 +92,7 @@ def test_ac18_erasure_keeps_every_hash_and_the_chain_verifies(stack, clock):  # 
     assert event["revision_history"][0]["rationale"] is None
     assert event["personal_data_erased_at"] == due.isoformat().replace("+00:00", "Z")
     assert [a["action"] for a in stack.audit(event_id)][-2:] == ["RECORD_ERASED", "VIEW"]
-    assert stack.report(event_id).status_code == 409
+    assert stack.report(event_id).status_code == 410  # contract delta \u03942
 
 
 def test_erasure_runs_on_the_service_clock_only_after_retention(stack, clock):  # noqa: F811

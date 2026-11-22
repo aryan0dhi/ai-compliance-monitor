@@ -24,7 +24,7 @@ from app.modules.records.service import (
     report_purpose,
 )
 from app.modules.review.disposition import DispositionConflict, PersonalDataAlreadyErased
-from app.modules.review.report import ReportUnavailable
+from app.modules.review.report import RecordErased
 from tests.fakes import ChainLedger, OutboxRecorder, RecordingSender, opened, user_principal
 from tests.test_report import (  # noqa: F401 - fixtures
     EX1_FIELDS,
@@ -61,8 +61,14 @@ class TestCrypto:
     def test_round_trip_and_token_form(self):
         key, event = crypto.new_data_key(), uuid4()
         token = crypto.seal(key, event, "p", "naïve text ✓")
-        assert token.startswith("enc:v1:") and "naïve" not in token
+        assert token.startswith("pd1:") and "naïve" not in token  # contract delta A3
         assert crypto.open_token(key, event, "p", token) == "naïve text ✓"
+
+    def test_tokens_sealed_before_a3_still_open(self):
+        key, event = crypto.new_data_key(), uuid4()
+        legacy = "enc:v1:" + crypto.seal(key, event, "p", "older")[len("pd1:") :]
+        assert crypto.is_token(legacy)
+        assert crypto.open_token(key, event, "p", legacy) == "older"
 
     def test_each_seal_uses_a_fresh_nonce(self):
         key, event = crypto.new_data_key(), uuid4()
@@ -267,7 +273,7 @@ class TestLifecycle:
         clock.advance(days=400)
         erase_expired(lambda: uow, ledger=ledger, clock=clock)
         ledger.calls.clear()
-        with pytest.raises(ReportUnavailable, match="erased"):
+        with pytest.raises(RecordErased):  # contract delta \u03942: 410
             report(uow, ledger, clock, full, reviewer)
         with pytest.raises(PersonalDataAlreadyErased, match="has been erased") as refused:
             dispose(uow, ledger, clock, full, reviewer, NOT_SERIOUS, rationale="late")
@@ -309,9 +315,10 @@ class TestHttp:
         body = http.client.get(f"/v1/events/{full}").json()
         assert body["personal_data_erased_at"] is not None
         assert body["revision_history"][0]["rationale"] is None
+        # Contract delta A5: still 200, every rationale and evidence null.
+        assert all(f["evidence"] is None for f in body["harm_fields"].values())
         resp = http.get(full)
-        assert resp.status_code == 409
-        assert "erased" in resp.json()["detail"]
+        assert resp.status_code == 410 and resp.json()["error_code"] == "RECORD_ERASED"
         for secret in SECRETS:
             assert secret not in resp.text
 
@@ -358,3 +365,22 @@ def test_a7_disposition_on_an_erased_event_is_coded_already_erased(
         }
     refused = [c for c in ledger.calls if c["entry_type"] == LedgerEntryType.REFUSED]
     assert [c["payload"]["status"] for c in refused] == [409, 409]
+
+
+def test_a3_ledger_rationale_is_the_pd1_sealed_string(uow, ledger, clock, full):  # noqa: F811
+    """Contract delta A3: the DISPOSITION payload's rationale is `pd1:` + the sealed value."""
+    (d,) = uow.dispositions.for_event(full)
+    assert d.rationale.startswith("pd1:")
+    (payload,) = [c["payload"] for c in ledger.calls if c["entry_type"] == "DISPOSITION"]
+    assert payload["rationale"] == d.rationale
+
+
+def test_a5_evidence_is_shown_until_erasure(uow, ledger, clock, full):  # noqa: F811
+    """Contract delta A5: the reviewer's evidence is on the event; null once erased (200)."""
+    rights = _view(uow, ledger, full).harm_fields["fundamental_rights"]
+    assert rights.evidence == EVIDENCE
+    clock.advance(days=400)
+    erase_expired(lambda: uow, ledger=ledger, clock=clock)
+    detail = _view(uow, ledger, full)
+    assert all(f.evidence is None for f in detail.harm_fields.values())
+    assert detail.harm_fields["fundamental_rights"].status == "CONFIRMED"

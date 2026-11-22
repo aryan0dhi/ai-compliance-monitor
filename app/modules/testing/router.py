@@ -1,12 +1,14 @@
 """/v1/test/* routes (Section 5.1). Mounted only when settings.test_routes_enabled, so they
 return 404 in production. Admin keys only (D-13)."""
 
+from datetime import timedelta
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, BeforeValidator, Field
 
-from app.core.types import UtcDatetime
+from app.core.errors import CodedHTTPException, ErrorCode
+from app.core.types import LATEST_ACCEPTED_TIME, UtcDatetime
 from app.db.uow import UnitOfWork, get_uow
 from app.modules.auth.interface import Principal, Role, get_principal
 from app.modules.testing.clock import SimulatedClock, get_simulated_clock
@@ -50,7 +52,13 @@ def _require_admin(principal: Principal) -> None:
 @router.post(
     "/clock/advance",
     response_model=ClockOut,
-    responses={**_ERRORS, 400: {"description": "seconds must be an integer from 0 to 10 years"}},
+    responses={
+        **_ERRORS,
+        400: {
+            "description": "seconds must be an integer from 0 to 10 years, and must not move "
+            "the simulated time to or past 9999-07-01T00:00:00Z (contract delta \u03949)"
+        },
+    },
 )
 def advance_clock(
     body: ClockAdvanceIn,
@@ -58,6 +66,13 @@ def advance_clock(
     clock: SimulatedClock = Depends(get_simulated_clock),
 ) -> ClockOut:
     _require_admin(principal)
+    # Contract delta \u03949: never to or past 9999-07-01T00:00:00Z.
+    if clock.now() + timedelta(seconds=body.seconds) >= LATEST_ACCEPTED_TIME:
+        raise CodedHTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            ErrorCode.MALFORMED_BODY,
+            "seconds would move the simulated time to or past 9999-07-01T00:00:00Z",
+        )
     simulated = clock.advance(body.seconds)
     return ClockOut(simulated_time=simulated, offset_seconds=clock.offset_seconds())
 

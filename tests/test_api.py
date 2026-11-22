@@ -100,6 +100,21 @@ class TestPostMetrics:
         resp = api.client.post("/v1/metrics", json={**VALID_METRIC, "value": 1})
         assert resp.status_code == 201 and resp.json()["value"] == 1
 
+    @pytest.mark.parametrize(
+        ("timestamp", "status"),
+        [
+            ("9999-07-01T00:00:00Z", 400),
+            ("9999-07-01T01:00:00+01:00", 400),  # the same instant
+            ("9999-06-30T23:59:59Z", 201),
+        ],
+    )
+    def test_samples_at_or_after_july_9999_are_400(self, api, timestamp, status):
+        """Contract delta A2 (D-29): 400 MALFORMED_BODY from 9999-07-01T00:00:00Z on."""
+        resp = api.client.post("/v1/metrics", json={**VALID_METRIC, "timestamp": timestamp})
+        assert resp.status_code == status, resp.text
+        if status == 400:
+            assert resp.json()["error_code"] == "MALFORMED_BODY"
+
     def test_timestamp_with_offset_normalized_to_utc(self, api):
         resp = api.client.post(
             "/v1/metrics", json={**VALID_METRIC, "timestamp": "2026-09-27T16:00:00-04:00"}
@@ -302,6 +317,7 @@ class TestGetEvents:
         pending = {
             "status": "PENDING",
             "prefill_evidence": None,
+            "evidence": None,  # contract delta A5
             "confirmed_by": None,
             "confirmed_at": None,
         }

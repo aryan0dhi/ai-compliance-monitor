@@ -16,7 +16,7 @@ from app.modules.events.repository import EventFilters
 from app.modules.ledger.interface import LedgerEntryType, LedgerWriter
 from app.modules.metrics.models import MetricSample
 from app.modules.notifications.interface import NotificationType, Notifier
-from app.modules.records.service import open_vault, revealed_rationales
+from app.modules.records.service import open_vault, revealed_evidence, revealed_rationales
 from app.modules.review.models import Disposition, HarmField
 from app.modules.thresholds.models import ThresholdVersion
 
@@ -53,6 +53,9 @@ class EventRecord:
     # Each disposition's rationale in plaintext, by seq. The stored value is sealed (REQ-16); a
     # rationale reads as null once the event's personal data has been erased, or if missing here.
     rationales: dict[int, str | None] = field(default_factory=dict)
+    # Each harm field's reviewer evidence in plaintext, by name (contract delta A5); sealed in
+    # storage like the rationale, null once erased or if missing here.
+    evidence: dict[str, str | None] = field(default_factory=dict)
     personal_data_erased_at: datetime | None = None
 
 
@@ -177,5 +180,6 @@ def get_event(
         harm_fields=harm_fields,
         dispositions=dispositions,
         rationales=revealed_rationales(vault, dispositions),
+        evidence=revealed_evidence(vault, harm_fields),
         personal_data_erased_at=vault.erased_at,
     )

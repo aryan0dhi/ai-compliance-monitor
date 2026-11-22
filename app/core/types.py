@@ -92,3 +92,8 @@ def to_internal_id(value: str) -> UUID | None:
     except ValueError:
         return None
     return parsed if str(parsed) == value else None
+
+
+# Contract delta \u03949 and A2 (D-29): no sample time, and no simulated clock time, at or after
+# this instant, so dates six months later (retention, D-28) still fit in year 9999.
+LATEST_ACCEPTED_TIME = datetime(9999, 7, 1, tzinfo=UTC)

@@ -3,9 +3,10 @@ POST /v1/events/{event_id}/report/submission, GET /v1/events/{event_id}/reports 
 GET /v1/reports/{report_id}. HTTP mapping only; logic in review.disposition and
 review.report."""
 
+from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.clock import Clock, get_clock
@@ -40,6 +41,7 @@ from app.modules.review.report_schemas import (
     ReportOut,
     ReportSubmissionIn,
     ReportVersionOut,
+    RevealedReport,
     SubmissionOut,
     report_body,
 )
@@ -149,6 +151,16 @@ def _report_errors(
     return _refused(exc, code, operation, event_id, principal, uow, ledger)
 
 
+def report_headers(report: RevealedReport) -> dict[str, str]:
+    """Contract delta \u03942: which stored version this is, and its hash."""
+    return {
+        "ETag": f'"{report.report_sha256}"',
+        "X-Report-Id": str(report.report_id),
+        "X-Report-Version": str(report.disposition_seq),
+        "X-Report-Sha256": report.report_sha256,
+    }
+
+
 @router.get(
     "/{event_id}/report",
     response_model=ReportOut,
@@ -156,14 +168,21 @@ def _report_errors(
     tags=["reports"],
     responses={
         **_REPORT_RESPONSES,
+        400: {"description": "MALFORMED_QUERY: format is not json or pdf"},
         409: {
-            "description": "The event's current tier isn't serious, it has no disposition yet "
-            "(REQ-08a), or it is a monitoring gap (INV-12)"
+            "description": "NO_DISPOSITION (REQ-08a), the event's current tier isn't serious, "
+            "or it is a monitoring gap (INV-12)"
         },
+        410: {"description": "RECORD_ERASED: the event's personal data was erased"},
+        501: {"description": "format=pdf isn't implemented yet"},
     },
 )
 def get_report_route(
     event_id: str,
+    report_format: Annotated[
+        Literal["json", "pdf"],
+        Query(alias="format", description="json (default) or pdf (contract delta \u03942)"),
+    ] = "json",
     principal: Principal = Depends(get_principal),
     uow: UnitOfWork = Depends(get_uow),
     ledger: LedgerWriter = Depends(get_ledger),
@@ -179,10 +198,18 @@ def get_report_route(
         authorize_report(principal)
         if parsed_id is None:
             raise EventNotFound(event_id)
+        if report_format == "pdf":
+            # The PDF layout comes from the delta's report.schema.json, which we don't have.
+            raise HTTPException(
+                status.HTTP_501_NOT_IMPLEMENTED,
+                "PDF reports are not implemented yet (contract delta \u03942); use format=json",
+            )
         report = get_report(parsed_id, principal=principal, uow=uow, ledger=ledger, clock=clock)
-    except (ReportDenied, EventNotFound, ReportUnavailable) as exc:
+    except (ReportDenied, EventNotFound, ReportUnavailable, RecordErased) as exc:
         raise _report_errors(exc, "getReport", parsed_id, principal, uow, ledger) from exc
-    return Response(report_body(report), media_type="application/json")
+    return Response(
+        report_body(report), media_type="application/json", headers=report_headers(report)
+    )
 
 
 @router.post(
@@ -310,4 +337,6 @@ def get_report_version_route(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "report not found") from exc
     except RecordErased as exc:
         raise http_error(status.HTTP_410_GONE, exc) from exc
-    return Response(report_body(report), media_type="application/json")
+    return Response(
+        report_body(report), media_type="application/json", headers=report_headers(report)
+    )

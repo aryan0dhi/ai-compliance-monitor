@@ -24,6 +24,7 @@ from app.modules.records.service import (
     evidence_purpose,
     open_vault,
     rationale_purpose,
+    revealed_evidence,
     revealed_rationales,
 )
 from app.modules.review.deadlines import DeadlineState, LooserTierNeedsRationale
@@ -202,6 +203,7 @@ def record_disposition(
         harm_fields=fields,
         dispositions=dispositions,
         rationales=revealed_rationales(vault, dispositions),
+        evidence=revealed_evidence(vault, fields),
     )
 
 

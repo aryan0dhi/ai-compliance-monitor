@@ -552,7 +552,7 @@ class TestHttp:
     def test_premature_report_is_409_with_error_body(self, http, ledger, event_id, reviewer):
         resp = http.get(event_id)
         assert resp.status_code == 409
-        assert set(resp.json()) == {"detail"}
+        assert resp.json()["error_code"] == "NO_DISPOSITION"  # contract delta \u03942
         # D-26 / Ex-4 premature-report: the attempt is in the ledger, attributed to the caller.
         (call,) = ledger.calls
         assert call["entry_type"] == LedgerEntryType.REFUSED
@@ -645,6 +645,26 @@ class TestHttp:
         erase_expired(lambda: uow, ledger=ledger, clock=clock)
         resp = http.client.get(f"/v1/reports/{report_id}")
         assert resp.status_code == 410 and resp.json()["error_code"] == "RECORD_ERASED"
+
+    def test_report_headers(self, http, uow, disposed):
+        """Contract delta \u03942: ETag, X-Report-Id, X-Report-Version, X-Report-Sha256."""
+        resp = http.get(disposed)
+        row = uow.reports.get(disposed, 1)
+        assert resp.headers["etag"] == f'"{row.report_sha256}"'
+        assert resp.headers["x-report-id"] == str(row.id)
+        assert resp.headers["x-report-version"] == "1"
+        assert resp.headers["x-report-sha256"] == resp.json()["report_sha256"]
+        by_id = http.client.get(f"/v1/reports/{row.id}")
+        assert by_id.headers["x-report-id"] == str(row.id)
+
+    def test_format_parameter(self, http, disposed):
+        default = http.get(disposed)
+        as_json = http.client.get(f"/v1/events/{disposed}/report", params={"format": "json"})
+        assert as_json.status_code == 200 and as_json.content == default.content
+        pdf = http.client.get(f"/v1/events/{disposed}/report", params={"format": "pdf"})
+        assert pdf.status_code == 501 and "PDF" in pdf.json()["detail"]
+        bad = http.client.get(f"/v1/events/{disposed}/report", params={"format": "xml"})
+        assert bad.status_code == 400 and bad.json()["error_code"] == "MALFORMED_QUERY"
 
     def test_operations_are_published(self):
         paths = create_app().openapi()["paths"]

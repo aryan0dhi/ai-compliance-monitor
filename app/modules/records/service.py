@@ -36,7 +36,7 @@ from app.modules.records.crypto import (
     wrap_key,
 )
 from app.modules.records.models import RecordKey
-from app.modules.review.models import Disposition
+from app.modules.review.models import Disposition, HarmField
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +124,11 @@ def open_vault(uow: UnitOfWork, event_id: UUID, *, create_at: datetime | None = 
 
 def revealed_rationales(vault: Vault, dispositions: list[Disposition]) -> dict[int, str | None]:
     return {d.seq: vault.reveal(rationale_purpose(d.seq), d.rationale) for d in dispositions}
+
+
+def revealed_evidence(vault: Vault, fields: list[HarmField]) -> dict[str, str | None]:
+    """Each harm field's reviewer evidence in plaintext, by name; null once erased."""
+    return {f.name: vault.reveal(evidence_purpose(f.name), f.evidence) for f in fields}
 
 
 def erasure_due_at(event: Event) -> datetime:

@@ -29,6 +29,7 @@ from app.modules.records.service import (
     note_purpose,
     open_vault,
     report_purpose,
+    revealed_evidence,
     revealed_rationales,
 )
 from app.modules.review.models import (
@@ -51,6 +52,12 @@ class ReportDenied(Exception):
 
 class ReportUnavailable(Exception):
     """The event has no report in its current state, or it can't be marked submitted (409)."""
+
+
+class NoDisposition(ReportUnavailable):
+    """The event has no disposition yet (409 NO_DISPOSITION, REQ-08a; contract delta \u03942)."""
+
+    error_code = ErrorCode.NO_DISPOSITION
 
 
 class ReportNotFound(Exception):
@@ -113,7 +120,7 @@ def _serious_history(uow: UnitOfWork, event: Event) -> list[Disposition]:
         raise ReportUnavailable("monitoring-gap events have no report (INV-12)")
     history = uow.dispositions.for_event(event.id)
     if not history:
-        raise ReportUnavailable("the event has no disposition yet (REQ-08a)")
+        raise NoDisposition("the event has no disposition yet (REQ-08a)")
     if not DispositionTier(history[-1].tier).is_serious:
         raise ReportUnavailable("the event's current tier is NOT_SERIOUS, so it has no report")
     return history
@@ -126,10 +133,8 @@ def _iso(value: datetime) -> str:
 def _open_vault(uow: UnitOfWork, event: Event, now: datetime) -> Vault:
     vault = open_vault(uow, event.id, create_at=now)
     if vault.erased_at is not None:
-        raise ReportUnavailable(
-            "the event's personal data, and so its report, was erased after its retention "
-            "period (REQ-16)"
-        )
+        # Contract delta \u03942: 410 RECORD_ERASED.
+        raise RecordErased()
     return vault
 
 
@@ -182,11 +187,13 @@ def get_report(
             )
             return _revealed(report, vault)
         now = clock.now()
+        harm_fields = uow.harm_fields.for_event(event.id)
         record = EventRecord(
             event=event,
-            harm_fields=uow.harm_fields.for_event(event.id),
+            harm_fields=harm_fields,
             dispositions=history,
             rationales=revealed_rationales(vault, history),
+            evidence=revealed_evidence(vault, harm_fields),
         )
         document = assemble_document(record, assembled_at=now)
         sealed = vault.seal(report_purpose(current.seq), document)
