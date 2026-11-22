@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from app.core.types import IdOut, OpaqueId, UtcDatetime
 from app.modules.events.schemas import EventDetail, HarmFieldOut
 from app.modules.events.service import EventRecord
+from app.modules.review.ids import report_public_id
 from app.modules.review.models import DispositionTier, ReportSubmission, ReportType, SubmissionKind
 
 AUTHORITY_REFERENCE_MAX_LENGTH = 200
@@ -70,7 +71,8 @@ class RevealedReport:
 
 
 class ReportSubmissionIn(BaseModel):
-    """Contract delta Δ3. `json_sha256` must be the version's `report_sha256`."""
+    """Contract delta Δ3. `json_sha256` must be the version's `report_sha256`. `report_id` is
+    the `rpt-` id, or the UUID form served before D-30."""
 
     report_id: OpaqueId
     json_sha256: str = Field(pattern="^[0-9a-f]{64}$")
@@ -96,7 +98,7 @@ class SubmissionOut(BaseModel):
     def from_submission(cls, s: ReportSubmission) -> "SubmissionOut":
         return cls(
             submission_id=s.id,
-            report_id=s.report_id,
+            report_id=report_public_id(s.report_id),
             event_id=s.event_id,
             submitted_by=s.submitted_by,
             submitted_at=s.submitted_at,

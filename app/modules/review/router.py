@@ -24,6 +24,7 @@ from app.modules.review.disposition import (
     authorize_disposition,
     record_disposition,
 )
+from app.modules.review.ids import parse_report_id, report_public_id
 from app.modules.review.refusals import record_refusal
 from app.modules.review.report import (
     RecordErased,
@@ -155,7 +156,7 @@ def report_headers(report: RevealedReport) -> dict[str, str]:
     """Contract delta Δ2: which stored version this is, and its hash."""
     return {
         "ETag": f'"{report.report_sha256}"',
-        "X-Report-Id": str(report.report_id),
+        "X-Report-Id": report_public_id(report.report_id),
         "X-Report-Version": str(report.disposition_seq),
         "X-Report-Sha256": report.report_sha256,
     }
@@ -244,7 +245,7 @@ def submit_report_route(
         authorize_report(principal)
         if parsed_id is None:
             raise EventNotFound(event_id)
-        report_id = to_internal_id(body.report_id)
+        report_id = parse_report_id(body.report_id)
         if report_id is None:
             raise ReportNotFound(body.report_id)
         submission = submit_report(
@@ -295,7 +296,7 @@ def list_report_versions_route(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "event not found") from exc
     return [
         ReportVersionOut(
-            report_id=v.report.id,
+            report_id=report_public_id(v.report.id),
             event_id=v.report.event_id,
             report_version=v.report.disposition_seq,
             status=v.status.value,
@@ -327,7 +328,7 @@ def get_report_version_route(
     """One stored report version, byte for byte as assembled (contract delta Δ4)."""
     try:
         authorize_report(principal)
-        parsed_id = to_internal_id(report_id)
+        parsed_id = parse_report_id(report_id)
         if parsed_id is None:
             raise ReportNotFound(report_id)
         report = get_report_version(parsed_id, principal=principal, uow=uow, ledger=ledger)
