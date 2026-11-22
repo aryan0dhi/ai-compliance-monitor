@@ -86,7 +86,7 @@ class AuditEntryOut(BaseModel):
 
 
 class VerificationRunOut(BaseModel):
-    """One ledger verification run (contract delta \u03945; D-29). The delta names only
+    """One ledger verification run (contract delta Δ5; D-29). The delta names only
     `trigger`, and A1 names `finished_at`, `valid` and `head_check`; the other fields are ours
     (#71's `ledger_check` row)."""
 

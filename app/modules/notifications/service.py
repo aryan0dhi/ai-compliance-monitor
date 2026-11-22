@@ -79,7 +79,7 @@ def register_webhook(
     )
     with uow:
         uow.webhooks.add(webhook)
-        # Contract delta \u03948 (D-29): the registration is audited, with the URL's SHA-256 only;
+        # Contract delta Δ8 (D-29): the registration is audited, with the URL's SHA-256 only;
         # a URL can carry tokens or point inside a network, so it never enters the ledger.
         ledger.append(
             uow.session,

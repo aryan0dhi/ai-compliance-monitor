@@ -70,7 +70,7 @@ class RevealedReport:
 
 
 class ReportSubmissionIn(BaseModel):
-    """Contract delta \u03943. `json_sha256` must be the version's `report_sha256`."""
+    """Contract delta Δ3. `json_sha256` must be the version's `report_sha256`."""
 
     report_id: OpaqueId
     json_sha256: str = Field(pattern="^[0-9a-f]{64}$")
@@ -108,7 +108,7 @@ class SubmissionOut(BaseModel):
 
 
 class ReportVersionOut(BaseModel):
-    """One stored report version in GET /v1/events/{id}/reports (contract delta \u03944). The
+    """One stored report version in GET /v1/events/{id}/reports (contract delta Δ4). The
     delta names only `status`; the other fields are ours (D-29)."""
 
     report_id: IdOut

@@ -157,7 +157,7 @@ class Report(Base):
 
     # References the event through fk_report_disposition (disposition.event_id → event.id).
     event_id: Mapped[UUID] = mapped_column(primary_key=True)
-    # Stable id of this report version (contract delta \u03944: GET /v1/reports/{report_id}).
+    # Stable id of this report version (contract delta Δ4: GET /v1/reports/{report_id}).
     id: Mapped[UUID] = mapped_column(unique=True, default=uuid4)
     disposition_seq: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
     document: Mapped[str]
@@ -174,14 +174,14 @@ class Report(Base):
 
 
 class SubmissionKind(StrEnum):
-    """The event's first submission is INITIAL; every later one is a FOLLOW_UP (\u03943)."""
+    """The event's first submission is INITIAL; every later one is a FOLLOW_UP (Δ3)."""
 
     INITIAL = "INITIAL"
     FOLLOW_UP = "FOLLOW_UP"
 
 
 class ReportType(StrEnum):
-    """The Article 73 report type the reviewer declares when recording a submission (\u03943)."""
+    """The Article 73 report type the reviewer declares when recording a submission (Δ3)."""
 
     INITIAL = "Initial"
     FOLLOW_UP = "Follow up"
@@ -190,7 +190,7 @@ class ReportType(StrEnum):
 
 
 class ReportSubmission(Base):
-    """A reviewer's record that one report version went to the authority (contract delta \u03943).
+    """A reviewer's record that one report version went to the authority (contract delta Δ3).
     The submission itself happens outside the system. Insert-only; one per report version."""
 
     __tablename__ = "report_submission"

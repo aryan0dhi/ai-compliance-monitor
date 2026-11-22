@@ -139,7 +139,7 @@ def test_model5_ex1_report_after_revision(stack, clock):
 
 
 def submission_body(stack, event_id, **extra):
-    """Contract delta \u03943: submit the event's current report version, by id and hash."""
+    """Contract delta Δ3: submit the event's current report version, by id and hash."""
     (version,) = [
         v
         for v in stack.call("GET", f"/v1/events/{event_id}/reports", "viewer").json()

@@ -52,7 +52,7 @@ def parse(ts: str) -> datetime:
 
 
 def assert_error_body(resp) -> None:
-    """B-22, with the Phase 5 delta's \u03947 codes: every error is JSON. Either our body,
+    """B-22, with the Phase 5 delta's Δ7 codes: every error is JSON. Either our body,
     {"detail": <str> or a list of {loc, msg, type}} plus optionally both "error_code" and
     "message", or the delta's {"error_code", "message"} (D-29)."""
     assert resp.headers.get("content-type", "").startswith("application/json"), resp.text

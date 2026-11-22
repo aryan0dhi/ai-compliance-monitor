@@ -41,7 +41,7 @@ from tests.test_report import (  # noqa: F401 - fixtures
 RATIONALE = "reviewer spoke to the affected applicant, Ms Example"
 EVIDENCE = "credit denied to applicants"
 SECRETS = (RATIONALE, EVIDENCE)
-# What the `full` event holds: no submission note since contract delta \u03943 (D-29).
+# What the `full` event holds: no submission note since contract delta Δ3 (D-29).
 ERASED_FIELDS = ["disposition.rationale", "harm_fields.evidence", "report.document"]
 
 
@@ -273,7 +273,7 @@ class TestLifecycle:
         clock.advance(days=400)
         erase_expired(lambda: uow, ledger=ledger, clock=clock)
         ledger.calls.clear()
-        with pytest.raises(RecordErased):  # contract delta \u03942: 410
+        with pytest.raises(RecordErased):  # contract delta Δ2: 410
             report(uow, ledger, clock, full, reviewer)
         with pytest.raises(PersonalDataAlreadyErased, match="has been erased") as refused:
             dispose(uow, ledger, clock, full, reviewer, NOT_SERIOUS, rationale="late")

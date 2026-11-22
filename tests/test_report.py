@@ -128,7 +128,7 @@ def report(uow, ledger, clock, event_id, principal):
 
 
 def submit(uow, ledger, clock, event_id, principal, version=None, *, json_sha256=None, **extra):
-    """Contract delta \u03943: record a submission of `version` (a report as GET returns it).
+    """Contract delta Δ3: record a submission of `version` (a report as GET returns it).
     Without one, a report_id that no event has."""
     request = SubmissionRequest(
         report_id=version.report_id if version is not None else uuid4(),
@@ -280,7 +280,7 @@ class TestRefusals:
         dispose(uow, ledger, clock, disposed, reviewer, NOT_SERIOUS, rationale="no harm after all")
         with pytest.raises(ReportUnavailable, match="NOT_SERIOUS"):
             report(uow, ledger, clock, disposed, reviewer)
-        # \u03943: the earlier version can't be submitted either.
+        # Δ3: the earlier version can't be submitted either.
         with pytest.raises(NotSubmittable):
             submit(uow, ledger, clock, disposed, reviewer, first)
 
@@ -331,7 +331,7 @@ class TestRefusals:
 
 
 class TestSubmission:
-    """Contract delta \u03943 (D-29): a submission names the report version and its hash."""
+    """Contract delta Δ3 (D-29): a submission names the report version and its hash."""
 
     def test_records_an_initial_submission(self, uow, ledger, clock, disposed, reviewer):
         stored = report(uow, ledger, clock, disposed, reviewer)
@@ -442,7 +442,7 @@ class TestSubmission:
 
 
 class TestVersions:
-    """Contract delta \u03944: report versions by event and by id."""
+    """Contract delta Δ4: report versions by event and by id."""
 
     def test_statuses_follow_revisions_and_submissions(
         self, uow, ledger, clock, disposed, reviewer
@@ -552,7 +552,7 @@ class TestHttp:
     def test_premature_report_is_409_with_error_body(self, http, ledger, event_id, reviewer):
         resp = http.get(event_id)
         assert resp.status_code == 409
-        assert resp.json()["error_code"] == "NO_DISPOSITION"  # contract delta \u03942
+        assert resp.json()["error_code"] == "NO_DISPOSITION"  # contract delta Δ2
         # D-26 / Ex-4 premature-report: the attempt is in the ledger, attributed to the caller.
         (call,) = ledger.calls
         assert call["entry_type"] == LedgerEntryType.REFUSED
@@ -647,7 +647,7 @@ class TestHttp:
         assert resp.status_code == 410 and resp.json()["error_code"] == "RECORD_ERASED"
 
     def test_report_headers(self, http, uow, disposed):
-        """Contract delta \u03942: ETag, X-Report-Id, X-Report-Version, X-Report-Sha256."""
+        """Contract delta Δ2: ETag, X-Report-Id, X-Report-Version, X-Report-Sha256."""
         resp = http.get(disposed)
         row = uow.reports.get(disposed, 1)
         assert resp.headers["etag"] == f'"{row.report_sha256}"'

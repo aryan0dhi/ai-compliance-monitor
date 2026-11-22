@@ -146,7 +146,7 @@ class ErasureResult:
     erased: list[UUID] = field(default_factory=list)
 
 
-# What erasure makes unreadable, as reported in `erased_fields` (contract delta \u03946, D-29).
+# What erasure makes unreadable, as reported in `erased_fields` (contract delta Δ6, D-29).
 PERSONAL_FIELDS = (
     "disposition.rationale",
     "harm_fields.evidence",
@@ -160,7 +160,7 @@ class UnknownEvent(Exception):
 
 
 class ErasureDenied(Exception):
-    """Only reviewers erase on request (403, contract delta \u03946)."""
+    """Only reviewers erase on request (403, contract delta Δ6)."""
 
 
 class RetentionNotExpired(Exception):
@@ -249,7 +249,7 @@ def erase_on_request(
     ledger: LedgerWriter,
     clock: Clock,
 ) -> Erasure:
-    """POST /v1/events/{id}/erasure (contract delta \u03946): a reviewer erases the event's
+    """POST /v1/events/{id}/erasure (contract delta Δ6): a reviewer erases the event's
     personal data now, once its retain_until has passed. Raises ErasureDenied (403),
     UnknownEvent (404), AlreadyErased or RetentionNotExpired (409); nothing changes then."""
     authorize_erasure(principal)

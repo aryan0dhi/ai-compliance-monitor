@@ -56,7 +56,7 @@ def _require_admin(principal: Principal) -> None:
         **_ERRORS,
         400: {
             "description": "seconds must be an integer from 0 to 10 years, and must not move "
-            "the simulated time to or past 9999-07-01T00:00:00Z (contract delta \u03949)"
+            "the simulated time to or past 9999-07-01T00:00:00Z (contract delta Δ9)"
         },
     },
 )
@@ -66,7 +66,7 @@ def advance_clock(
     clock: SimulatedClock = Depends(get_simulated_clock),
 ) -> ClockOut:
     _require_admin(principal)
-    # Contract delta \u03949: never to or past 9999-07-01T00:00:00Z.
+    # Contract delta Δ9: never to or past 9999-07-01T00:00:00Z.
     if clock.now() + timedelta(seconds=body.seconds) >= LATEST_ACCEPTED_TIME:
         raise CodedHTTPException(
             status.HTTP_400_BAD_REQUEST,

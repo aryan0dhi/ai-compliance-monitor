@@ -55,7 +55,7 @@ class ReportUnavailable(Exception):
 
 
 class NoDisposition(ReportUnavailable):
-    """The event has no disposition yet (409 NO_DISPOSITION, REQ-08a; contract delta \u03942)."""
+    """The event has no disposition yet (409 NO_DISPOSITION, REQ-08a; contract delta Δ2)."""
 
     error_code = ErrorCode.NO_DISPOSITION
 
@@ -97,7 +97,7 @@ class ReportAlreadySubmitted(ReportUnavailable):
     error_code = ErrorCode.REPORT_ALREADY_SUBMITTED
 
 
-# Contract delta \u03944: the version list is for reviewers and viewers; report content and
+# Contract delta Δ4: the version list is for reviewers and viewers; report content and
 # submissions stay reviewer-only (REPORT_ROLES).
 REPORT_LIST_ROLES = frozenset({Role.REVIEWER, Role.VIEWER})
 
@@ -133,7 +133,7 @@ def _iso(value: datetime) -> str:
 def _open_vault(uow: UnitOfWork, event: Event, now: datetime) -> Vault:
     vault = open_vault(uow, event.id, create_at=now)
     if vault.erased_at is not None:
-        # Contract delta \u03942: 410 RECORD_ERASED.
+        # Contract delta Δ2: 410 RECORD_ERASED.
         raise RecordErased()
     return vault
 
@@ -225,7 +225,7 @@ def get_report(
     return _revealed(report, vault)
 
 
-# --- report versions and submissions (contract delta \u03943, \u03944; D-29) ------------------
+# --- report versions and submissions (contract delta Δ3, Δ4; D-29) ------------------
 
 
 class ReportStatus(StrEnum):
@@ -322,7 +322,7 @@ def submit_report(
     ledger: LedgerWriter,
     clock: Clock,
 ) -> ReportSubmission:
-    """POST /v1/events/{id}/report/submission (contract delta \u03943): record that the reviewer
+    """POST /v1/events/{id}/report/submission (contract delta Δ3): record that the reviewer
     submitted a report version to the authority; nothing is sent. The first submission of an
     event is INITIAL, later ones FOLLOW_UP. Checks, in order: 403, 404 (event, or a report_id
     that isn't one of its versions), 410 RECORD_ERASED, 409 NOT_SUBMITTABLE, REPORT_NOT_CURRENT,
