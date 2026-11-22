@@ -1,5 +1,6 @@
 """Webhook registration (POST /v1/webhooks, Section 5.1)."""
 
+import hashlib
 import json
 import secrets
 from dataclasses import dataclass
@@ -8,6 +9,7 @@ from uuid import UUID, uuid4
 from app.core.clock import Clock
 from app.db.uow import UnitOfWork
 from app.modules.auth.principal import Principal, Role
+from app.modules.ledger.interface import LedgerEntryType, LedgerWriter
 from app.modules.notifications.delivery import SendResult, WebhookSender, parse_webhook_url
 from app.modules.notifications.models import NotificationType, Webhook
 
@@ -51,6 +53,7 @@ def register_webhook(
     sender: WebhookSender,
     clock: Clock,
     require_https: bool,
+    ledger: LedgerWriter,
 ) -> RegisteredWebhook:
     if principal.role not in WEBHOOK_ADMIN_ROLES:
         raise WebhookAccessDenied(f"role {principal.role} may not register webhooks")
@@ -76,4 +79,16 @@ def register_webhook(
     )
     with uow:
         uow.webhooks.add(webhook)
+        # Contract delta \u03948 (D-29): the registration is audited, with the URL's SHA-256 only;
+        # a URL can carry tokens or point inside a network, so it never enters the ledger.
+        ledger.append(
+            uow.session,
+            entry_type=LedgerEntryType.WEBHOOK_REGISTERED,
+            actor_id=principal.actor_id,
+            payload={
+                "webhook_id": str(webhook.id),
+                "url_sha256": hashlib.sha256(url.encode("utf-8")).hexdigest(),
+                "event_types": webhook.event_types,
+            },
+        )
     return RegisteredWebhook(webhook=webhook, secret=secret)

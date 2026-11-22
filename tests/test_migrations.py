@@ -74,7 +74,7 @@ def _create_index_statements(sql: str) -> set[str]:
 
 def test_single_head():
     heads = ScriptDirectory.from_config(_config()).get_heads()
-    assert heads == ["0014"], heads
+    assert heads == ["0015"], heads
 
 
 @pytest.fixture(scope="module")
@@ -116,6 +116,13 @@ def test_downgrade_drops_everything():
     sql = _offline_sql("downgrade", "0002:0001")
     for table in ["event", "threshold_version", "metric_sample", "monitored_system"]:
         assert f"DROP TABLE {table};" in sql
+
+
+def test_0015_adds_the_webhook_registered_entry_type():
+    up = _offline_sql("upgrade", "0014:0015")
+    assert "'RECORD_ERASED', 'WEBHOOK_REGISTERED')" in up
+    down = _offline_sql("downgrade", "0015:0014")
+    assert "'WEBHOOK_REGISTERED'" not in down
 
 
 def test_0014_adds_the_record_erased_entry_type():

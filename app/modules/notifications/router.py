@@ -6,6 +6,7 @@ from app.core.clock import Clock, get_clock
 from app.core.config import get_settings
 from app.db.uow import UnitOfWork, get_uow
 from app.modules.auth.interface import Principal, get_principal
+from app.modules.ledger.interface import LedgerWriter, get_ledger
 from app.modules.notifications.delivery import WebhookSender, sender_from_settings
 from app.modules.notifications.schemas import WebhookIn, WebhookOut
 from app.modules.notifications.service import (
@@ -40,6 +41,7 @@ def register_webhook_route(
     uow: UnitOfWork = Depends(get_uow),
     sender: WebhookSender = Depends(get_webhook_sender),
     clock: Clock = Depends(get_clock),
+    ledger: LedgerWriter = Depends(get_ledger),
 ) -> WebhookOut:
     try:
         registered = register_webhook(
@@ -50,6 +52,7 @@ def register_webhook_route(
             sender=sender,
             clock=clock,
             require_https=get_settings().webhook_https_required,
+            ledger=ledger,
         )
     except WebhookAccessDenied as exc:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
