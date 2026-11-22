@@ -35,6 +35,7 @@ final, because cross-team tests depend on them.
 | D-26 | Which refused calls the audit trail records (Model 5 Ex-4) | Interim (team, #67); **pod** to confirm |
 | D-27 | Scheduled ledger check and its alert (Model 5 Ex-5) | Interim (team, #71); **pod** to confirm the alert format |
 | D-28 | REQ-16 erasure: what is personal data, when it is erased, how reads show it | Interim (team, #70, from Phase 2 Q7.1/Q7.2); **pod** to confirm the API field |
+| D-29 | The other team's Phase 5 contract delta (`delta.md`, Δ1–Δ11, A1–A7) | Additive rows: agreed by both teams, being implemented; Change rows: awaiting instructor sign-off |
 
 ## Agenda for the next pod meeting
 
@@ -645,6 +646,35 @@ field or operation for it, and nothing says which fields are personal.
 
 **To agree with the pod.** The `personal_data_erased_at` field and `409` for an erased report, and
 whether deleting rows after retention (#69) is wanted at all once personal data is erased.
+
+## D-29: The Phase 5 contract delta (Δ1–Δ11, A1–A7)
+
+**Source.** The other team's `delta.md` (status "proposed"). Our team accepted it on 2026-11-22,
+including its three open inputs. Per the delta, every row needs both teams' agreement and a
+**Change** row also needs the instructor's sign-off. We don't have the shared contract text the
+delta modifies or its `report.schema.json`, so where the delta is silent we keep our own behaviour
+and record it here.
+
+**Error codes (\u03947), implemented.**
+- Errors the delta names carry `error_code` and `message` **next to** the existing `detail`
+  (B-22), so clients reading either shape keep working. `message` repeats the text.
+- Coded today: every `400` (`MALFORMED_QUERY` when a query parameter is invalid, otherwise
+  `MALFORMED_BODY`), and `409 ALREADY_ERASED` for a disposition on an erased event (A7).
+  Later rows add the report, submission and erasure codes.
+- Not coded: errors the delta names no code for (`401`, `403`, `404`, other `409`s). The delta
+  says the baseline contract codes every error, but we don't have the baseline's code list, so
+  we don't invent names.
+- The contract suite accepts both our body and the delta's `{error_code, message}`.
+
+**A7, implemented.** A disposition on an erased event is `409 ALREADY_ERASED` ("the personal
+data of this event has been erased"). It is checked after the role (`403`), the body (`400`) and
+the event (`404`), and before the monitoring-gap check (the delta's `EVENT_NOT_REVIEWABLE`).
+
+**Open input "viewer writes", not implemented.** The delta notes that viewers may call
+`POST /v1/webhooks` and the test endpoints. Here they stay admin-only (D-13): Phase 2 §5.1 says
+viewers "can read events/audit/ledger but not write", and opening them would let a viewer send
+event data to any URL, wipe the shared environment, or advance the clock past retention and
+trigger irreversible erasure (REQ-16). Changing it needs instructor sign-off.
 
 ## Other notes
 

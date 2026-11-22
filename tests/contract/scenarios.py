@@ -52,15 +52,25 @@ def parse(ts: str) -> datetime:
 
 
 def assert_error_body(resp) -> None:
-    """B-22: every error is JSON {"detail": <str> or a list of {loc, msg, type}}."""
+    """B-22, with the Phase 5 delta's \u03947 codes: every error is JSON. Either our body,
+    {"detail": <str> or a list of {loc, msg, type}} plus optionally both "error_code" and
+    "message", or the delta's {"error_code", "message"} (D-29)."""
     assert resp.headers.get("content-type", "").startswith("application/json"), resp.text
     body = resp.json()
-    assert isinstance(body, dict) and set(body) == {"detail"}, body
-    detail = body["detail"]
-    assert isinstance(detail, str) or (
-        isinstance(detail, list)
-        and all(isinstance(e, dict) and {"loc", "msg", "type"} <= set(e) for e in detail)
-    ), body
+    assert isinstance(body, dict), body
+    coded = {"error_code", "message"}
+    if "detail" not in body:
+        assert set(body) == coded, body
+    else:
+        assert set(body) in ({"detail"}, {"detail"} | coded), body
+        detail = body["detail"]
+        assert isinstance(detail, str) or (
+            isinstance(detail, list)
+            and all(isinstance(e, dict) and {"loc", "msg", "type"} <= set(e) for e in detail)
+        ), body
+    if "error_code" in body:
+        assert isinstance(body["error_code"], str) and body["error_code"].isupper(), body
+        assert isinstance(body["message"], str) and body["message"], body
 
 
 class ScenarioRun:

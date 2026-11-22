@@ -503,7 +503,10 @@ class TestHttp:
     def test_invalid_bodies_are_400_and_change_nothing(self, http, uow, ledger, event_id, body):
         resp = http.post(event_id, body)
         assert resp.status_code == 400, resp.text
-        assert set(resp.json()) == {"detail"}
+        body = resp.json()
+        # B-22 detail, plus the contract delta's \u03947 code (D-29).
+        assert set(body) == {"detail", "error_code", "message"}
+        assert body["error_code"] == "MALFORMED_BODY"
         assert_unchanged(uow, ledger, event_id)
 
     def test_malformed_json_is_400(self, http, event_id):
