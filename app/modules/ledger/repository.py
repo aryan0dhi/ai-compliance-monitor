@@ -18,6 +18,10 @@ class LedgerRepository(Protocol):
         """Entries recorded for one event, in seq order."""
         ...
 
+    def head(self) -> LedgerEntry | None:
+        """The entry with the highest seq, or None while the ledger is empty."""
+        ...
+
 
 class SqlLedgerRepository:
     def __init__(self, session: Session) -> None:
@@ -39,6 +43,11 @@ class SqlLedgerRepository:
     def for_event(self, event_id: UUID) -> list[LedgerEntry]:
         stmt = select(LedgerEntry).where(LedgerEntry.event_id == event_id).order_by(LedgerEntry.seq)
         return list(self._session.scalars(stmt))
+
+    def head(self) -> LedgerEntry | None:
+        return self._session.scalars(
+            select(LedgerEntry).order_by(LedgerEntry.seq.desc()).limit(1)
+        ).first()
 
 
 class LedgerCheckRepository(Protocol):

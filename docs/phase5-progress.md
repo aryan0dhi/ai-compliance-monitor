@@ -9,7 +9,7 @@ No secrets go in this file.
 | Requirement | State on `main` | Open PR / branch | Owner |
 |---|---|---|---|
 | REQ-07, 08a/b, 09, 10, 11, 13 (Phase 4) | Merged (#51–#58), unit + PostgreSQL tested | — | EthanBar25 |
-| REQ-12 report + submission (JSON) | Merged (#64) | — | EthanBar25 |
+| REQ-12 report + submission (JSON) | Merged (#64); Δ1 `pod-h-report-1` document (D-30) | — | EthanBar25; D-30 report schema |
 | REQ-14 / Model 5 Ex-4 refused attempts; phase 4 in `/v1/meta` | Not on main | #73 (CI green, no review) | EthanBar25 |
 | REQ-06 scheduled ledger check + critical alert | Not on main | #74, stacked on #73 (CI green) | EthanBar25 |
 | `/v1/meta` build SHA; README/HANDOFF refresh | Not on main | #65, #66 (stacked) | EthanBar25 |

@@ -1,9 +1,8 @@
-"""The Article 73 report document (pod interface Report; REQ-12, B-12, D-25).
+"""Report response and submission schemas (REQ-12; contract delta Δ1–Δ4; D-25, D-30).
 
-`assemble_document` renders the report once, at assembly; the stored text is what every later
-`GET /v1/events/{id}/report` returns. `report_body` adds the two fields that aren't part of the
-stored document (its hash, and when it was marked submitted) without re-rendering it, so the
-bytes before them never change.
+The report document itself is `report_document.ReportDocument`. The routes serve the stored
+document bytes exactly as assembled (`report_body`), so `X-Report-Sha256` is the hash of the
+response body; submission status is in the version list, not in the document.
 """
 
 import hashlib
@@ -14,43 +13,15 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 from app.core.types import IdOut, OpaqueId, UtcDatetime
-from app.modules.events.schemas import EventDetail, HarmFieldOut
-from app.modules.events.service import EventRecord
 from app.modules.review.ids import report_public_id
-from app.modules.review.models import DispositionTier, ReportSubmission, ReportType, SubmissionKind
+from app.modules.review.models import ReportSubmission, ReportType, SubmissionKind
+from app.modules.review.report_document import ReportDocument
 
 AUTHORITY_REFERENCE_MAX_LENGTH = 200
 
 
-class DeterminationOut(BaseModel):
-    """The serious-tier disposition the report is about (REQ-08a)."""
-
-    tier: DispositionTier
-    reviewer_id: IdOut
-    rationale: str | None
-
-
-class ReportDocument(BaseModel):
-    """What is stored at assembly. Field order is the order of the JSON text."""
-
-    # The event as it stood at assembly: state, harm fields and revision history.
-    event: EventDetail
-    harm_fields: dict[str, HarmFieldOut]
-    determination: DeterminationOut
-    detected_at: UtcDatetime
-    # recorded_at of the disposition reported on.
-    determination_at: UtcDatetime
-    assembled_at: UtcDatetime
-    deadline_utc: UtcDatetime
-
-
-class ReportTail(BaseModel):
-    report_sha256: str = Field(pattern="^[0-9a-f]{64}$")
-    submitted_at: UtcDatetime | None = None
-
-
-class ReportOut(ReportDocument, ReportTail):
-    """The response schema (pod Report). Routes send `report_body` bytes, not this model."""
+# The response schema of the report reads (Δ1 `pod-h-report-1`); routes send the stored bytes.
+ReportOut = ReportDocument
 
 
 @dataclass(frozen=True)
@@ -123,37 +94,10 @@ class ReportVersionOut(BaseModel):
     submitted_at: UtcDatetime | None
 
 
-def assemble_document(record: EventRecord, *, assembled_at: datetime) -> str:
-    """Render the report of the record's latest disposition, which must be a serious tier."""
-    current = record.dispositions[-1]
-    if not DispositionTier(current.tier).is_serious or current.deadline_utc is None:
-        raise ValueError("only a serious-tier determination has a report")
-    event = EventDetail.from_record(record)
-    if event.harm_fields is None:  # pragma: no cover - a disposition opens all four fields
-        raise ValueError("a disposed breach has harm fields")
-    return ReportDocument(
-        event=event,
-        harm_fields=event.harm_fields,
-        determination=DeterminationOut(
-            tier=DispositionTier(current.tier),
-            reviewer_id=current.reviewer_id,
-            rationale=record.rationales.get(current.seq),
-        ),
-        detected_at=record.event.detected_at,
-        determination_at=current.recorded_at,
-        assembled_at=assembled_at,
-        deadline_utc=current.deadline_utc,
-    ).model_dump_json()
-
-
 def sha256_hex(document: str) -> str:
     return hashlib.sha256(document.encode("utf-8")).hexdigest()
 
 
 def report_body(report: RevealedReport) -> bytes:
-    """The stored document with report_sha256 and submitted_at appended, as response bytes."""
-    tail = ReportTail(report_sha256=report.report_sha256, submitted_at=report.submitted_at)
-    document = report.document
-    if not (document.startswith("{") and document.endswith("}")):  # pragma: no cover
-        raise ValueError("a stored report is a JSON object")
-    return (document[:-1] + "," + tail.model_dump_json()[1:]).encode("utf-8")
+    """The stored document, byte for byte (Δ2: "the bytes are those stored at assembly")."""
+    return report.document.encode("utf-8")

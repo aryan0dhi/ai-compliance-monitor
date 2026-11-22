@@ -817,24 +817,31 @@ components:
         evidence: { type: [string, "null"], maxLength: 4000 }
 
     Report:
+      description: |
+        Contract delta Δ1, `schema_version` `pod-h-report-1`. The full definition is
+        [report.schema.json](report.schema.json) (JSON Schema 2020-12, the other team's file,
+        unchanged); this entry lists only its top level. Served byte for byte as stored at
+        assembly, nothing appended: the body's SHA-256 is `X-Report-Sha256`, and submission
+        status is in `GET /v1/events/{event_id}/reports` (D-30).
       type: object
-      required: [event, harm_fields, determination, detected_at, determination_at, assembled_at, deadline_utc]
+      additionalProperties: false
+      required: [report_id, report_version, report_kind, schema_version, event, harm_fields,
+                 determination, timestamps, risk_indicator, regulation, submission_marking,
+                 article73_template, ledger_anchor]
       properties:
-        event: { $ref: "#/components/schemas/Event" }
-        harm_fields: { $ref: "#/components/schemas/HarmFields" }
-        determination:
-          type: object
-          required: [tier, reviewer_id]
-          properties:
-            tier: { $ref: "#/components/schemas/DispositionTier" }
-            reviewer_id: { $ref: "#/components/schemas/Id" }
-            rationale: { type: [string, "null"] }
-        detected_at: { type: string, format: date-time }
-        determination_at: { type: string, format: date-time }
-        assembled_at: { type: string, format: date-time }
-        deadline_utc: { type: string, format: date-time }
-        report_sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
-        submitted_at: { type: [string, "null"], format: date-time }
+        report_id: { type: string, pattern: "^rpt-[0-9a-f]{32}$" }
+        report_version: { type: integer, minimum: 1 }
+        report_kind: { enum: [SERIOUS_INCIDENT, NOT_SERIOUS_CLOSURE] }
+        schema_version: { const: pod-h-report-1 }
+        event: { type: object }
+        harm_fields: { type: object }
+        determination: { type: object }
+        timestamps: { type: object }
+        risk_indicator: { type: object }
+        regulation: { type: object }
+        submission_marking: { enum: [null, NOT FOR SUBMISSION] }
+        article73_template: { type: object }
+        ledger_anchor: { type: object }
 
     AuditEntry:
       type: object

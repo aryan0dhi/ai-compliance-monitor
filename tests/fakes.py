@@ -319,6 +319,9 @@ class FakeLedgerRepository:
     def for_event(self, event_id: UUID) -> list[LedgerEntry]:
         return sorted((e for e in self.entries if e.event_id == event_id), key=lambda e: e.seq)
 
+    def head(self) -> LedgerEntry | None:
+        return max(self.entries, key=lambda e: e.seq, default=None)
+
 
 class FakeWebhookRepository:
     def __init__(self) -> None:
