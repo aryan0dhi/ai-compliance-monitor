@@ -5,8 +5,10 @@ review.report."""
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.clock import Clock, get_clock
+from app.core.errors import http_error
 from app.core.types import to_internal_id
 from app.db.uow import UnitOfWork, get_uow
 from app.modules.auth.interface import Principal, get_principal
@@ -94,7 +96,7 @@ def _refused(
     principal: Principal,
     uow: UnitOfWork,
     ledger: LedgerWriter,
-) -> HTTPException:
+) -> StarletteHTTPException:
     """The HTTP error for a refused call, after recording the attempt in the ledger (D-26)."""
     record_refusal(
         event_id,
@@ -105,7 +107,7 @@ def _refused(
         uow=uow,
         ledger=ledger,
     )
-    return HTTPException(status_code, str(exc))
+    return http_error(status_code, exc)
 
 
 _REPORT_RESPONSES: dict[int | str, dict[str, str]] = {
@@ -122,7 +124,7 @@ def _report_errors(
     principal: Principal,
     uow: UnitOfWork,
     ledger: LedgerWriter,
-) -> HTTPException:
+) -> StarletteHTTPException:
     if isinstance(exc, EventNotFound):
         return HTTPException(status.HTTP_404_NOT_FOUND, "event not found")
     code = 403 if isinstance(exc, ReportDenied) else 409

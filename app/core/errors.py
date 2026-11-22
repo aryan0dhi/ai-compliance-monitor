@@ -1,6 +1,8 @@
 """Shared error types and handlers."""
 
 import logging
+from enum import StrEnum
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -27,6 +29,55 @@ class UnimplementedError(NotImplementedError):
         )
 
 
+class ErrorCode(StrEnum):
+    """Machine-readable error codes (Phase 5 contract delta \u03947; docs/spec-decisions.md D-29).
+
+    Sent as `error_code` next to `detail`, with `message` repeating the text, for the errors the
+    delta names. Other errors keep the plain `{"detail"}` body (B-22).
+    """
+
+    MALFORMED_BODY = "MALFORMED_BODY"
+    MALFORMED_QUERY = "MALFORMED_QUERY"
+    RECORD_ERASED = "RECORD_ERASED"
+    NOT_SUBMITTABLE = "NOT_SUBMITTABLE"
+    REPORT_NOT_CURRENT = "REPORT_NOT_CURRENT"
+    REPORT_HASH_MISMATCH = "REPORT_HASH_MISMATCH"
+    REPORT_ALREADY_SUBMITTED = "REPORT_ALREADY_SUBMITTED"
+    RETENTION_NOT_EXPIRED = "RETENTION_NOT_EXPIRED"
+    ALREADY_ERASED = "ALREADY_ERASED"
+
+
+class CodedHTTPException(StarletteHTTPException):
+    """An HTTP error that carries an ErrorCode."""
+
+    def __init__(
+        self,
+        status_code: int,
+        error_code: ErrorCode,
+        message: str,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        super().__init__(status_code, message, headers)
+        self.error_code = error_code
+
+
+def error_body(detail: Any, error_code: ErrorCode | None = None, message: str | None = None):
+    """B-22 body, plus `error_code` and `message` when the error has a code (\u03947)."""
+    body: dict[str, Any] = {"detail": detail}
+    if error_code is not None:
+        body["error_code"] = error_code.value
+        body["message"] = message if message is not None else str(detail)
+    return body
+
+
+def http_error(status_code: int, exc: Exception) -> StarletteHTTPException:
+    """An HTTP error for a domain exception, coded when the exception has an `error_code`."""
+    code = getattr(exc, "error_code", None)
+    if code is not None:
+        return CodedHTTPException(status_code, ErrorCode(code), str(exc))
+    return StarletteHTTPException(status_code, str(exc))
+
+
 def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(UnimplementedError)
     async def _unimplemented(_: Request, exc: UnimplementedError) -> JSONResponse:
@@ -39,13 +90,19 @@ def register_error_handlers(app: FastAPI) -> None:
             {"loc": list(err.get("loc", ())), "msg": err.get("msg", ""), "type": err.get("type")}
             for err in exc.errors()
         ]
-        return JSONResponse(status_code=400, content={"detail": errors})
+        in_query = any(e["loc"][:1] == ["query"] for e in errors)
+        code = ErrorCode.MALFORMED_QUERY if in_query else ErrorCode.MALFORMED_BODY
+        message = "the query is malformed" if in_query else "the request is malformed"
+        return JSONResponse(status_code=400, content=error_body(errors, code, message))
 
     # Every HTTP error, including 404 for an unknown route and 405, is {"detail": <str>} (B-22).
     @app.exception_handler(StarletteHTTPException)
     async def _http_error(_: Request, exc: StarletteHTTPException) -> JSONResponse:
+        code = exc.error_code if isinstance(exc, CodedHTTPException) else None
         return JSONResponse(
-            status_code=exc.status_code, content={"detail": exc.detail}, headers=exc.headers
+            status_code=exc.status_code,
+            content=error_body(exc.detail, code),
+            headers=exc.headers,
         )
 
     @app.exception_handler(Exception)

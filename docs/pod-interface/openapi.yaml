@@ -513,6 +513,15 @@ components:
             - type: string
             - type: array
               items: { type: object }
+        error_code:
+          type: string
+          description: |
+            **Proposed** (contract delta \u03947, D-29). A machine-readable code such as
+            `MALFORMED_BODY`, `MALFORMED_QUERY` or `ALREADY_ERASED`. Present together with
+            `message`, only on the errors the delta names.
+        message:
+          type: string
+          description: Human-readable text of the coded error.
 
     Meta:
       type: object

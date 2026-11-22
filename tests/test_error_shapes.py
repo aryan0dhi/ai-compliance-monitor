@@ -99,7 +99,22 @@ class TestErrorShapes:
     def test_400_bad_query(self, env):
         client, state = env
         state["principal"] = user_principal(Role.VIEWER)
-        check(client.get("/v1/events", params={"limit": SENTINEL}), 400)
+        resp = check(client.get("/v1/events", params={"limit": SENTINEL}), 400)
+        # Contract delta \u03947 (D-29): a malformed query is coded MALFORMED_QUERY.
+        assert resp.json()["error_code"] == "MALFORMED_QUERY"
+        assert resp.json()["message"] == "the query is malformed"
+
+    def test_400_body_is_coded_malformed_body(self, env):
+        client, _ = env
+        body = {**VALID_METRIC, "value": SENTINEL}
+        resp = check(client.post("/v1/metrics", json=body), 400)
+        assert resp.json()["error_code"] == "MALFORMED_BODY"
+
+    def test_uncoded_errors_keep_the_plain_body(self, env):
+        client, state = env
+        state["principal"] = user_principal(Role.VIEWER)
+        resp = check(client.get("/v1/events/00000000-0000-4000-8000-000000000000"), 404)
+        assert resp.json() == {"detail": "event not found"}
 
     def test_400_unknown_system(self, env):
         client, state = env

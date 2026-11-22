@@ -13,6 +13,7 @@ from typing import Any
 from uuid import UUID
 
 from app.core.clock import Clock
+from app.core.errors import ErrorCode
 from app.db.uow import UnitOfWork
 from app.modules.auth.interface import Principal, Role
 from app.modules.events.models import Event, EventState, EventType
@@ -45,6 +46,16 @@ class DispositionDenied(Exception):
 
 class DispositionConflict(Exception):
     """The event can't take this disposition in its current state (409)."""
+
+
+class PersonalDataAlreadyErased(DispositionConflict):
+    """The event's personal data has been erased (REQ-16): it takes no more dispositions (409,
+    contract delta A7)."""
+
+    error_code = ErrorCode.ALREADY_ERASED
+
+    def __init__(self) -> None:
+        super().__init__("the personal data of this event has been erased")
 
 
 class MissingRationale(ValueError):
@@ -130,15 +141,13 @@ def record_disposition(
         event = uow.events.get_for_update(event_id)
         if event is None:
             raise EventNotFound(str(event_id))
+        # A7: an erased event is refused before any other state check (EVENT_NOT_REVIEWABLE).
+        if open_vault(uow, event.id).erased_at is not None:
+            raise PersonalDataAlreadyErased()
         if event.type != EventType.THRESHOLD_BREACH:
             raise DispositionConflict("monitoring-gap events are never reviewed (INV-12)")
         now = clock.now()
         vault = open_vault(uow, event.id, create_at=now)
-        if vault.erased_at is not None:
-            raise DispositionConflict(
-                "the event's personal data was erased after its retention period (REQ-16), so "
-                "it can't take another disposition"
-            )
         fields = _apply_confirmations(
             uow, event, request.harm_fields, vault=vault, reviewer=principal.actor_id, at=now
         )

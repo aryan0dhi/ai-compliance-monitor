@@ -24,7 +24,7 @@ from app.modules.records.service import (
     rationale_purpose,
     report_purpose,
 )
-from app.modules.review.disposition import DispositionConflict
+from app.modules.review.disposition import DispositionConflict, PersonalDataAlreadyErased
 from app.modules.review.report import ReportUnavailable
 from tests.fakes import ChainLedger, OutboxRecorder, RecordingSender, opened, user_principal
 from tests.test_report import (  # noqa: F401 - fixtures
@@ -268,8 +268,9 @@ class TestLifecycle:
         ledger.calls.clear()
         with pytest.raises(ReportUnavailable, match="erased"):
             report(uow, ledger, clock, full, reviewer)
-        with pytest.raises(DispositionConflict, match="erased"):
+        with pytest.raises(PersonalDataAlreadyErased, match="has been erased") as refused:
             dispose(uow, ledger, clock, full, reviewer, NOT_SERIOUS, rationale="late")
+        assert isinstance(refused.value, DispositionConflict)  # still a 409
         assert ledger.calls == [] and len(uow.dispositions.for_event(full)) == 1
 
     def test_erased_only_once(self, uow, ledger, clock, full):
@@ -331,3 +332,27 @@ def test_the_worker_erases_due_events(uow, clock, ledger, full):
     assert result.erasure.erased == [full] and "erasure" not in result.errors
     erased = [e for e in uow.ledger.entries if e.entry_type == LedgerEntryType.PERSONAL_DATA_ERASED]
     assert [e.event_id for e in erased] == [full]
+
+
+def test_a7_disposition_on_an_erased_event_is_coded_already_erased(
+    uow,
+    ledger,
+    clock,
+    full,
+    reviewer,  # noqa: F811 - pytest fixture
+):
+    """Contract delta A7: 409 ALREADY_ERASED for any disposition on an erased event, with or
+    without a rationale; the refusal is still ledgered (D-26)."""
+    clock.advance(days=400)
+    erase_expired(lambda: uow, ledger=ledger, clock=clock)
+    http = Http(uow, ledger, clock, reviewer)
+    for body in ({"tier": "DEATH"}, {"tier": "NOT_SERIOUS", "rationale": "late"}):
+        resp = http.client.post(f"/v1/events/{full}/disposition", json=body)
+        assert resp.status_code == 409, resp.text
+        assert resp.json() == {
+            "detail": "the personal data of this event has been erased",
+            "error_code": "ALREADY_ERASED",
+            "message": "the personal data of this event has been erased",
+        }
+    refused = [c for c in ledger.calls if c["entry_type"] == LedgerEntryType.REFUSED]
+    assert [c["payload"]["status"] for c in refused] == [409, 409]

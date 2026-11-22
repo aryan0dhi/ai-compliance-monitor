@@ -48,7 +48,9 @@ deployment provides.
   conflicts. A disallowed webhook URL is `400`; `422` only when the verification ping fails.
   `405` for a wrong method and `500` for a server fault. Every error, those included and `404`
   for an unknown path too, is JSON `{"detail": ...}`: a string, or for `400` a list of
-  `{loc, msg, type}`. It never echoes raw input, URLs or exception text. The course routes
+  `{loc, msg, type}`. Errors with a contract-delta code (\u03947: every `400`, and the
+  `409`/`410` codes such as `ALREADY_ERASED`) add `error_code` and `message` next to `detail`
+  (D-29). It never echoes raw input, URLs or exception text. The course routes
   (`/test/setup`, `/test/report`) keep their own `{message, source}` body. Ids are opaque strings of 1-64 characters from
   `[A-Za-z0-9._~-]`, not UUIDs. A well-formed `system_id` filter that names no system gives an
   empty `200`; a body `system_id` that is not the key's own is `403`; an id outside the
