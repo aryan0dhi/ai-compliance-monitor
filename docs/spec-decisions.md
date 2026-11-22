@@ -736,6 +736,27 @@ now lists both in `Allow`, taken from the API's own OpenAPI document.
 - Not changed here (\u03942 is a Change row): `GET /v1/events/{event_id}/report` still answers
   `409` after erasure and has no `format`/`X-Report-*` headers.
 
+**Change rows (\u03942, \u03949, A2, A3, A5, A6): implemented in a held PR, not merged until the
+instructor signs off.**
+- \u03942 `GET /v1/events/{event_id}/report`: `409 NO_DISPOSITION` before any disposition;
+  `410 RECORD_ERASED` after erasure (was `409`); `ETag`, `X-Report-Id`, `X-Report-Version`
+  (the disposition number) and `X-Report-Sha256` on `200` (also on `GET /v1/reports/{id}`);
+  `format=json` (default). `format=pdf` answers `501`: the PDF follows the delta's
+  `report.schema.json` (\u03941), which we don't have. A current tier of NOT_SERIOUS stays an uncoded
+  `409`: the delta's not-serious closure report is part of \u03941.
+- \u03949 / A2: `POST /v1/test/clock/advance` is `400` if it would move the simulated time to or past
+  `9999-07-01T00:00:00Z`; `POST /v1/metrics` is `400 MALFORMED_BODY` for a `timestamp` at or after
+  it.
+- A3: sealed values are `pd1:` followed by the sealed value (was `enc:v1:`, which still opens).
+  Our ledger entry is `DISPOSITION`, not the delta's `DISPOSITION_RECORDED`/`_REVISED` (we don't
+  have the baseline's names).
+- A5: each harm field on `GET /v1/events/{id}` has `evidence` (the reviewer's text, sealed in
+  storage); after erasure it, like every rationale, is `null` and the event is still `200`.
+- A6: reset already empties every Phase 5 table and keeps `reset_count` + 1; the deadlock retry
+  (`500` after three) is not built: our reset is one transaction.
+
+**Not implemented (blocked).** \u03941 and PDF reports need `report.schema.json`.
+
 **Open input "viewer writes", not implemented.** The delta notes that viewers may call
 `POST /v1/webhooks` and the test endpoints. Here they stay admin-only (D-13): Phase 2 §5.1 says
 viewers "can read events/audit/ledger but not write", and opening them would let a viewer send
