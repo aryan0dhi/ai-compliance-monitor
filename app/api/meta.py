@@ -4,7 +4,7 @@ Unauthenticated, so a cross-team harness can decide which checks apply before it
 """
 
 from fastapi import APIRouter
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # docs/pod-interface/openapi.yaml info.version.
 INTERFACE_VERSION = "1.0.0-draft"
@@ -16,9 +16,13 @@ class MetaOut(BaseModel):
     interface_version: str
     phases: list[int]
     test_routes: bool
+    build: str = Field(
+        description="Git commit the running image was built from, or `unknown` (optional in "
+        "the pod interface; lets testers tell a defect from an old deployment)."
+    )
 
 
-def build_meta_router(*, test_routes: bool) -> APIRouter:
+def build_meta_router(*, test_routes: bool, build: str = "unknown") -> APIRouter:
     router = APIRouter(tags=["discovery"])
 
     @router.get("/meta", response_model=MetaOut)
@@ -27,6 +31,7 @@ def build_meta_router(*, test_routes: bool) -> APIRouter:
             interface_version=INTERFACE_VERSION,
             phases=IMPLEMENTED_PHASES,
             test_routes=test_routes,
+            build=build,
         )
 
     return router

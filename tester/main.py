@@ -198,6 +198,17 @@ def _code_coverage(client: httpx.Client, session: Session) -> dict[str, Any]:
     return {"covered": covered, "total": total, "basis": basis}
 
 
+def _target_build(client: httpx.Client, session: Session) -> str | None:
+    """The target's GET /v1/meta "build" (#45, optional in the pod interface), so a report says
+    which deployment it tested; None when the target doesn't say."""
+    try:
+        resp = client.get(f"{session.target_url}/v1/meta", timeout=REPORT_TIMEOUT_S)
+        build = resp.json().get("build") if resp.status_code == 200 else None
+    except (httpx.HTTPError, ValueError, AttributeError):
+        return None
+    return build if _non_empty_str(build) else None
+
+
 def _scope_coverage(run: SuiteRun, key: str, universe: list[str], what: str) -> dict[str, Any]:
     outcomes = {r["test_id"]: r["outcome"] for r in run.results}
     covered = {
@@ -214,10 +225,13 @@ def _scope_coverage(run: SuiteRun, key: str, universe: list[str], what: str) -> 
     }
 
 
-def build_report(session: Session, run: SuiteRun, code: dict[str, Any]) -> dict[str, Any]:
+def build_report(
+    session: Session, run: SuiteRun, code: dict[str, Any], target_build: str | None = None
+) -> dict[str, Any]:
     return {
         "session_id": session.session_id,
         "target_url": session.target_url,
+        "target_build": target_build,
         "finished_at": datetime.now(UTC).isoformat(),
         "aborted": run.aborted,
         "results": run.results,
@@ -308,8 +322,9 @@ async def run(
     try:
         overrides = target_overrides(session.target_url)
         suite = await run_in_threadpool(runner, session.target_url, overrides)
+        target_build = await run_in_threadpool(_target_build, client, session)
         code = await run_in_threadpool(_code_coverage, client, session)
-        report = build_report(session, suite, code)
+        report = build_report(session, suite, code, target_build)
     except Exception:
         logger.exception("tester run failed")
         suite = SuiteRun(planned=[], results=[], aborted="the tester failed")

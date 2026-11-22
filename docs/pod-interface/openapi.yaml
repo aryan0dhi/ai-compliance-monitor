@@ -525,6 +525,11 @@ components:
           description: Phases whose operations this deployment provides.
         test_routes: { type: boolean, description: "Whether /v1/test/* are available." }
         team: { type: string }
+        build:
+          type: string
+          description: |
+            **Proposed, optional.** The source revision the deployment runs (e.g. a git commit
+            SHA, or `unknown`), so a tester can tell a defect from an outdated deployment.
 
     Me:
       type: object

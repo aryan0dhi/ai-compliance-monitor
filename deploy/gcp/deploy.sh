@@ -58,6 +58,6 @@ git -c core.autocrlf=false archive --format=tar.gz -o "$release/release.tgz" HEA
 # doesn't expand "~/".
 g compute scp --zone "$ZONE" "$release/release.tgz" deploy/gcp/remote-up.sh deploy/gcp/issue-keys.sh "$VM:."
 
-g compute ssh "$VM" --zone "$ZONE" --command "SITE_ADDRESS='$SITE_ADDRESS' bash ~/remote-up.sh"
+g compute ssh "$VM" --zone "$ZONE" --command "SITE_ADDRESS='$SITE_ADDRESS' GIT_SHA='$(git rev-parse HEAD)' bash ~/remote-up.sh"
 echo "== deployed: https://$SITE_ADDRESS   (health: https://$SITE_ADDRESS/healthz)"
 echo "   Issue keys for a team: $GCLOUD compute ssh $VM --zone $ZONE --command 'bash ~/issue-keys.sh <team>'"

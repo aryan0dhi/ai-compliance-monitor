@@ -145,6 +145,9 @@ components:
       properties:
         session_id: { type: string, minLength: 1 }
         target_url: { type: string, minLength: 1 }
+        target_build:
+          type: [string, "null"]
+          description: The target's GET /v1/meta `build` (deployed revision), or null if it has none
         finished_at: { type: string, format: date-time }
         aborted:
           type: [string, "null"]
