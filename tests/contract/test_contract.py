@@ -103,6 +103,30 @@ def test_roles_are_enforced(api):
     assert api.call("GET", "/v1/events", as_="system").status_code == 403
 
 
+@covers(reqs=["REQ-13"], endpoints=["GET /v1/me", "GET /v1/meta", "GET /v1/test/clock"])
+def test_discovery_identity_and_clock(api, test_routes):
+    """GET /v1/meta needs no key; GET /v1/me names each key's role; GET /v1/test/clock reads
+    the simulated time (pod interface Meta, Me, Clock)."""
+    meta = api.call("GET", "/v1/meta", as_=None)
+    assert meta.status_code == 200, meta.text
+    body = meta.json()
+    assert isinstance(body["interface_version"], str) and body["interface_version"]
+    assert body["phases"] and set(body["phases"]) <= {3, 4, 5}
+    assert body["test_routes"] is test_routes
+    roles = {"system": "system", "viewer": "viewer", "admin": "admin", "reviewer": "reviewer"}
+    for key, role in roles.items():
+        if key not in api.target.keys:
+            continue
+        me = api.call("GET", "/v1/me", as_=key)
+        assert me.status_code == 200, me.text
+        assert me.json()["role"] == role and me.json()["actor_id"], me.json()
+    assert api.call("GET", "/v1/me", as_=None).status_code == 401
+    if test_routes:
+        clock = api.call("GET", "/v1/test/clock", as_="admin")
+        assert clock.status_code == 200, clock.text
+        assert parse(clock.json()["simulated_time"]).tzinfo is not None
+
+
 @covers(reqs=["REQ-13"], endpoints=["POST /v1/webhooks"], model1=["DENIED"], decision="D-13")
 def test_only_admins_register_webhooks(api):
     body = {"url": "https://example.com/hook", "event_types": ["flag_notification"]}

@@ -25,7 +25,7 @@ target's `GET /v1/meta` phases.
 | --- | --- | --- |
 | FLAGGED | Model 1 state | `test_ac03_drift_breach_records_every_required_field`; scenarios Ex-1, Ex-2 (step `flagged`), Ex-4 |
 | UNDER_REVIEW | Model 1 state | scenario Ex-1 step `under-review`, Ex-4 step `premature-report` (phase 4) |
-| DISPOSITIONED | Model 1 state | scenario Ex-1 step `assign-other-serious` (phase 4) |
+| DISPOSITIONED | Model 1 state | scenario Ex-1 step `assign-other-serious` (phase 4); `test_ac13_report_follows_the_shared_schema` |
 | CLOSED | Model 1 state | scenario Ex-2 step `not-serious` (phase 4) |
 | GAP_OPEN | Model 1 state | `test_ac02_gap_after_three_missed_intervals_not_two` |
 | REVIEWER_NOTIFIED | Model 1 state | `test_ac02_gap_notification_reaches_the_reviewer` |
@@ -33,7 +33,7 @@ target's `GET /v1/meta` phases.
 | DENIED | Model 1 element (refused action) | `test_roles_are_enforced`, `test_only_admins_register_webhooks`; scenario Ex-4 step `viewer-denied` |
 | INV-7 | Model 4 invariant (hash chain) | `test_ac06_ledger_verifies_and_an_edited_export_is_caught_offline`, `test_ledger_still_verifies_after_the_whole_run` |
 | INV-8 | Model 4 invariant | `test_ac15_every_view_is_logged_with_identity_and_time` |
-| INV-10 | Model 4 invariant (retention ≥ 6 months) | `test_ac03_drift_breach_records_every_required_field` |
+| INV-10 | Model 4 invariant (retention ≥ 6 months) | `test_ac03_drift_breach_records_every_required_field`, `test_ac05_ac18_kept_until_retention_then_erased_with_the_chain_intact` |
 | INV-12 | Model 4 invariant (gaps never reviewed) | `test_ac02_gap_after_three_missed_intervals_not_two` |
 | INV-13 | Model 4 invariant (`detected_at` set once) | `test_ac15_every_view_is_logged_with_identity_and_time` |
 | Ex-1 | Model 5 example (serious, revised upward) | `test_model5_ex1_serious_incident_flag`, when every step ran (its report step is phase 5) |
