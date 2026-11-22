@@ -107,11 +107,12 @@ class TestIngestion:
             "drift_score was 0.35 at 2026-09-27T20:00:00Z, above the threshold of 0.30 "
             f"(threshold version {drift_id})."
         )
-        assert [n for n, f in fields.items() if f.prefill_evidence is None] == [
+        # The query has no ORDER BY, so compare as a set.
+        assert {n for n, f in fields.items() if f.prefill_evidence is None} == {
             "health_safety",
             "critical_infrastructure",
             "property_environment",
-        ]
+        }
 
     def test_ledger_failure_persists_nothing(self, make_uow, seed, pg_sessionmaker):
         system_id, _, _ = seed()

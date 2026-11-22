@@ -58,6 +58,11 @@ def _table_lines_after_migrations(sql: str, table: str) -> set[str]:
         elif action.startswith("DROP CONSTRAINT "):
             name = action.split()[2]
             lines = {line for line in lines if not line.startswith(f"CONSTRAINT {name} ")}
+        elif re.fullmatch(r"ALTER COLUMN \w+ (DROP|SET) NOT NULL", action):
+            _, _, column, change, *_ = action.split()
+            old = next(line for line in lines if line.startswith(f"{column} "))
+            base = old.removesuffix(" NOT NULL")
+            lines = (lines - {old}) | {base if change == "DROP" else base + " NOT NULL"}
         else:
             raise AssertionError(f"test can't replay: ALTER TABLE {table} {action}")
     return lines
@@ -69,7 +74,7 @@ def _create_index_statements(sql: str) -> set[str]:
 
 def test_single_head():
     heads = ScriptDirectory.from_config(_config()).get_heads()
-    assert heads == ["0010"], heads
+    assert heads == ["0011"], heads
 
 
 @pytest.fixture(scope="module")
@@ -111,6 +116,17 @@ def test_downgrade_drops_everything():
     sql = _offline_sql("downgrade", "0002:0001")
     for table in ["event", "threshold_version", "metric_sample", "monitored_system"]:
         assert f"DROP TABLE {table};" in sql
+
+
+def test_0011_adds_ledger_check_and_ledger_alerts():
+    up = _offline_sql("upgrade", "0010:0011")
+    assert "CREATE TABLE ledger_check" in up
+    assert "ALTER TABLE notification ALTER COLUMN event_id DROP NOT NULL;" in up
+    assert "'reminder', 'ledger_alert')" in up
+    down = _offline_sql("downgrade", "0011:0010")
+    assert "DROP TABLE ledger_check;" in down
+    assert "ALTER TABLE notification ALTER COLUMN event_id SET NOT NULL;" in down
+    assert "'ledger_alert'" not in down
 
 
 def test_0010_adds_the_refused_entry_type():
