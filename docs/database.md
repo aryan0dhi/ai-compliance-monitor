@@ -15,6 +15,7 @@ to [spec-decisions.md](spec-decisions.md).
 | `0007` | `deadline_utc` on `disposition` (backfilled) | REQ-10 (B-10, D-23) |
 | `0008` | `reminder_percent`, `reminder_deadline_utc` on `notification` | REQ-11 (B-11, D-24) |
 | `0012` | `record_key`; `PERSONAL_DATA_ERASED` ledger entry type; seals existing personal text | REQ-16, REQ-05 (D-28) |
+| `0013` | `event_retention_guard` trigger on `event` | REQ-05, INV-10 (#69) |
 
 ## Diagram
 
@@ -296,6 +297,10 @@ The **storage** part of REQ-05 (Phase 3):
   check doesn't depend on the connection's time zone.
 - `RESTRICT` foreign keys stop a monitored system, threshold version or triggering sample from being
   deleted while an event references it.
+- The `event_retention_guard` trigger (migration 0013, #69) refuses to `DELETE` an event before its
+  `retain_until`, or to move `retain_until` earlier, even by direct SQL. "Now" is the service
+  clock: database time plus the `simulated_clock` offset in the test environment. `TRUNCATE` (the
+  test reset) doesn't fire it.
 
 **End of retention** (REQ-16, D-28): the worker destroys an event's record key once the service
 clock reaches `max(retain_until, detected_at + 6 calendar months + 1 day)`
@@ -303,10 +308,8 @@ clock reaches `max(retain_until, detected_at + 6 calendar months + 1 day)`
 and its metric data are kept (REQ-05 is a minimum); only its personal text becomes unreadable.
 
 **Not implemented yet** (#69, #68):
-- Nothing *prevents* deleting an `event` row or a non-triggering `metric_sample` before
-  `retain_until` by direct SQL, other than the foreign keys above (a trigger is proposed in #69).
-- Nothing deletes rows after retention, and nothing protects the ±1 h evidence-window samples of
-  an event (D-05).
+- Nothing protects the ±1 h evidence-window samples of an event other than its triggering sample
+  (D-05, #68). Nothing deletes rows after retention: personal data is erased instead (D-28).
 - Backups: the GCP test deployment has only the VM disk; there is no database backup schedule.
 
 ## Extending the schema
