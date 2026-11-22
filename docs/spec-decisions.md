@@ -35,8 +35,8 @@ final, because cross-team tests depend on them.
 | D-26 | Which refused calls the audit trail records (Model 5 Ex-4) | Interim (team, #67); **pod** to confirm |
 | D-27 | Scheduled ledger check and its alert (Model 5 Ex-5) | Interim (team, #71); **pod** to confirm the alert format |
 | D-28 | REQ-16 erasure: what is personal data, when it is erased, how reads show it | Interim (team, #70, from Phase 2 Q7.1/Q7.2); **pod** to confirm the API field |
-| D-29 | The other team's Phase 5 contract delta (`delta.md`, Δ1–Δ11, A1–A7) | Agreed by both teams; implemented except PDF reports (D-30) and viewer writes |
-| D-30 | The Δ1 report schema (`report.schema.json`, `pod-h-report-1`) | Implemented (team); PDF not built |
+| D-29 | The other team's Phase 5 contract delta (`delta.md`, Δ1–Δ11, A1–A7) | Agreed by both teams; implemented except viewer writes |
+| D-30 | The Δ1 report schema (`report.schema.json`, `pod-h-report-1`) and its PDF | Implemented (team) |
 
 ## Agenda for the next pod meeting
 
@@ -744,7 +744,7 @@ unchanged (scope check on the PR) and merged on that basis.
 - Δ2 `GET /v1/events/{event_id}/report`: `409 NO_DISPOSITION` before any disposition;
   `410 RECORD_ERASED` after erasure (was `409`); `ETag`, `X-Report-Id`, `X-Report-Version`
   (the disposition number) and `X-Report-Sha256` on `200` (also on `GET /v1/reports/{id}`);
-  `format=json` (default). `format=pdf` answers `501`: the PDF is of the Δ1 report (D-30).
+  `format=json` (default). `format=pdf` returns the PDF of the same report (D-30).
   A current tier of NOT_SERIOUS stays an uncoded `409` (Phase 2 Model 5 Ex-2; D-30).
 - Δ9 / A2: `POST /v1/test/clock/advance` is `400` if it would move the simulated time to or past
   `9999-07-01T00:00:00Z`; `POST /v1/metrics` is `400 MALFORMED_BODY` for a `timestamp` at or after
@@ -757,7 +757,6 @@ unchanged (scope check on the PR) and merged on that basis.
 - A6: reset already empties every Phase 5 table and keeps `reset_count` + 1; the deadlock retry
   (`500` after three) is not built: our reset is one transaction.
 
-**Not implemented yet.** PDF reports (D-30).
 
 **Open input "viewer writes", not implemented.** The delta notes that viewers may call
 `POST /v1/webhooks` and the test endpoints. Here they stay admin-only (D-13): Phase 2 §5.1 says
@@ -813,12 +812,30 @@ This section records our choices where the schema leaves one, and what is still 
   `REPORT_ASSEMBLED` entry, which carries the report's hash, comes after it. On an empty ledger
   (only in unit tests) it is seq 0 and the genesis hash.
 
-**PDF (`format=pdf`), not built: still `501`.**
-- A PDF must show every value of the report faithfully. Reviewer evidence and rationales are free
-  Unicode text, which the built-in PDF fonts can't render, so faithful output needs a PDF library
-  and an embedded Unicode font. That is a new runtime dependency, to be added to the hash-pinned
-  lockfiles deliberately rather than as part of the schema change.
-- Phase 2 §6.4 also lists the PDF among the features that can be dropped (`phase5-progress.md`).
+**PDF (`format=pdf`; `app/modules/review/report_pdf.py`).**
+- **Content.** The PDF is rendered from the stored JSON text, the same bytes `format=json`
+  serves:
+  - every value is printed under its JSON path, in document order, with nothing added or left
+    out (null/true/false as JSON);
+  - the exact JSON is embedded as the attachment `report.json`;
+  - each page's footer gives the report id and the JSON's SHA-256.
+- **Library and font.** fpdf2 2.9.0 (with Pillow and fontTools, pinned with hashes). The text
+  is set in embedded DejaVu Sans 2.35 (Bitstream Vera licence, `app/assets/fonts`).
+- **Unicode.** Characters the font has glyphs for (Latin, Greek, Cyrillic, symbols) print as
+  themselves. Any other character, for example CJK, prints as `[U+XXXX]`, never as a blank or a
+  look-alike, and the attachment keeps it exactly. Tabs and line breaks print as spaces.
+- **Same bytes every time.** The PDF's dates are the report's `assembled_at` and its file id
+  comes from the JSON's hash. With the font and library pinned, the same stored report gives the
+  same PDF on every request, which is how we read Δ2's "bytes … stored at assembly" without
+  storing a second copy.
+- **No separate copy.** Not storing the PDF means no second copy of the personal data to seal
+  and erase (REQ-16): once the event's key is destroyed, both formats are `410`.
+- **Headers.** `X-Report-Id`, `X-Report-Version` and `X-Report-Sha256` identify the report, as
+  for JSON (the SHA-256 is the JSON's). The `ETag` is the PDF's own SHA-256.
+  `Content-Disposition: inline; filename="rpt-….pdf"`.
+- **Refusals.** Requests, roles, refusals and ledger entries are exactly those of `format=json`.
+- Reports stored before this section (D-25 shape) render too: their fields are printed the same
+  way.
 
 - The schema is copied unchanged to [`pod-interface/report.schema.json`](pod-interface/report.schema.json).
   `tests/test_report_schema.py` validates served reports against it, plus the ordering

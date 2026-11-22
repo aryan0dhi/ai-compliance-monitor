@@ -14,6 +14,8 @@ dependencies = [
     "httpx>=0.27,<1",
     # Per-event record keys, AES-256-GCM (REQ-16, app/modules/records).
     "cryptography>=44",
+    # PDF reports, format=pdf (contract delta Δ2, app/modules/review/report_pdf.py).
+    "fpdf2>=2.9,<3",
 ]
 
 [project.optional-dependencies]
@@ -27,6 +29,8 @@ dev = [
     "schemathesis>=4.0",
     "bandit>=1.7",
     "pip-audit>=2.7",
+    # Reads report PDFs back in tests (tests/test_report_pdf.py).
+    "pypdf>=7",
 ]
 
 [build-system]
@@ -35,6 +39,10 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["app*"]
+
+[tool.setuptools.package-data]
+# The font embedded in report PDFs, with its licence.
+app = ["assets/fonts/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

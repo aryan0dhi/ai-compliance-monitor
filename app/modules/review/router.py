@@ -3,6 +3,7 @@ POST /v1/events/{event_id}/report/submission, GET /v1/events/{event_id}/reports 
 GET /v1/reports/{report_id}. HTTP mapping only; logic in review.disposition and
 review.report."""
 
+import hashlib
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -38,6 +39,7 @@ from app.modules.review.report import (
     list_report_versions,
     submit_report,
 )
+from app.modules.review.report_pdf import render_report_pdf
 from app.modules.review.report_schemas import (
     ReportOut,
     ReportSubmissionIn,
@@ -175,7 +177,10 @@ def report_headers(report: RevealedReport) -> dict[str, str]:
             "or it is a monitoring gap (INV-12)"
         },
         410: {"description": "RECORD_ERASED: the event's personal data was erased"},
-        501: {"description": "format=pdf isn't implemented yet"},
+        200: {
+            "description": "The report: JSON (format=json, default) or its PDF (format=pdf)",
+            "content": {"application/pdf": {"schema": {"type": "string", "format": "binary"}}},
+        },
     },
 )
 def get_report_route(
@@ -200,18 +205,24 @@ def get_report_route(
         authorize_report(principal)
         if parsed_id is None:
             raise EventNotFound(event_id)
-        if report_format == "pdf":
-            # Not built yet: a faithful PDF of the report needs an embedded Unicode font (D-30).
-            raise HTTPException(
-                status.HTTP_501_NOT_IMPLEMENTED,
-                "PDF reports are not implemented yet (contract delta Δ2); use format=json",
-            )
         report = get_report(parsed_id, principal=principal, uow=uow, ledger=ledger, clock=clock)
     except (ReportDenied, EventNotFound, ReportUnavailable, RecordErased) as exc:
         raise _report_errors(exc, "getReport", parsed_id, principal, uow, ledger) from exc
-    return Response(
-        report_body(report), media_type="application/json", headers=report_headers(report)
-    )
+    headers = report_headers(report)
+    if report_format == "pdf":
+        # Δ2: the PDF of the same stored report (D-30). X-Report-* still identify the report;
+        # the ETag is this representation's own.
+        pdf = render_report_pdf(
+            report.document,
+            report_id=report_public_id(report.report_id),
+            assembled_at=report.assembled_at,
+        )
+        headers["ETag"] = f'"{hashlib.sha256(pdf).hexdigest()}"'
+        headers["Content-Disposition"] = (
+            f'inline; filename="{report_public_id(report.report_id)}.pdf"'
+        )
+        return Response(pdf, media_type="application/pdf", headers=headers)
+    return Response(report_body(report), media_type="application/json", headers=headers)
 
 
 @router.post(

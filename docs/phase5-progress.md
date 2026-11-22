@@ -40,7 +40,7 @@ Migration line: `0009` on main → `0010` (#73) → `0011` (#74) → `0012` (#75
   a limit in D-27.
 - **REQ-15 explicit elapsed-time field, REQ-10 configurable calendar:** both change the shared
   contract (B-15, B-10); pod decision first.
-- **PDF reports, health dashboard:** Phase 2 §6.4 allows dropping both; needs pod agreement.
+- **PDF reports:** built (`format=pdf`, D-30). **Health dashboard:** Phase 2 §6.4 allows dropping it; needs pod agreement.
 
 ## Blockers and decisions needed
 
