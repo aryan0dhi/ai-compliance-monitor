@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from app.core.types import IdOut, UtcDatetime
 from app.modules.ledger.chain import VerifyResult, format_timestamp
-from app.modules.ledger.models import LedgerEntry
+from app.modules.ledger.models import HeadCheck, LedgerCheck, LedgerEntry, VerificationTrigger
 from app.modules.ledger.service import LedgerPage
 
 HASH_ALGORITHM = (
@@ -83,3 +83,36 @@ class AuditEntryOut(BaseModel):
     @classmethod
     def from_entry(cls, e: LedgerEntry) -> "AuditEntryOut":
         return cls(actor_id=e.actor_id, action=e.entry_type, timestamp=e.at, seq=e.seq)
+
+
+class VerificationRunOut(BaseModel):
+    """One ledger verification run (contract delta \u03945; D-29). The delta names only
+    `trigger`, and A1 names `finished_at`, `valid` and `head_check`; the other fields are ours
+    (#71's `ledger_check` row)."""
+
+    verification_id: IdOut
+    trigger: VerificationTrigger
+    finished_at: UtcDatetime
+    valid: bool
+    entries_checked: int
+    first_mismatch: int | None
+    head_seq: int
+    head_hash: str
+    # MATCH, MISMATCH or NO_ANCHOR; null for runs recorded before migration 0016.
+    head_check: HeadCheck | None
+    problem: str | None
+
+    @classmethod
+    def from_check(cls, c: LedgerCheck) -> "VerificationRunOut":
+        return cls(
+            verification_id=c.id,
+            trigger=VerificationTrigger(c.trigger),
+            finished_at=c.checked_at,
+            valid=c.valid,
+            entries_checked=c.entries_checked,
+            first_mismatch=c.first_mismatch,
+            head_seq=c.head_seq,
+            head_hash=c.head_hash,
+            head_check=HeadCheck(c.head_check) if c.head_check else None,
+            problem=c.problem,
+        )

@@ -17,3 +17,17 @@ class SimulatedClockState(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
     offset_seconds: Mapped[int] = mapped_column(BigInteger)
+
+
+class ResetCounter(Base):
+    """How many times POST /v1/test/reset has run (contract delta A1 `reset_count`). At most one
+    row (id = 1); absent means 0. Reset increments it instead of truncating it."""
+
+    __tablename__ = "reset_counter"
+    __table_args__ = (
+        CheckConstraint("id = 1", name="single_row"),
+        CheckConstraint("resets >= 0", name="resets_non_negative"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    resets: Mapped[int] = mapped_column(BigInteger)

@@ -25,7 +25,7 @@ from uuid import uuid4
 from app.core.clock import Clock
 from app.db.uow import UnitOfWork
 from app.modules.ledger.chain import VerifyResult, verify_chain
-from app.modules.ledger.models import LedgerCheck, LedgerEntry
+from app.modules.ledger.models import HeadCheck, LedgerCheck, LedgerEntry, VerificationTrigger
 from app.modules.notifications.models import NotificationType
 from app.modules.notifications.outbox import build_notification
 
@@ -55,25 +55,34 @@ def _entry_hash_at(uow: UnitOfWork, seq: int) -> str | None:
     return page[0].entry_hash if page and page[0].seq == seq else None
 
 
-def _problem(uow: UnitOfWork, anchor: LedgerCheck | None, result: VerifyResult) -> str | None:
+def _head_check(uow: UnitOfWork, anchor: LedgerCheck | None, result: VerifyResult) -> HeadCheck:
+    """Compare the chain's end with the head of the last passing check (D-14, D-27)."""
+    if anchor is None or anchor.head_seq == 0:
+        return HeadCheck.NO_ANCHOR
+    if result.head_seq < anchor.head_seq:
+        return HeadCheck.MISMATCH
+    if _entry_hash_at(uow, anchor.head_seq) != anchor.head_hash:
+        return HeadCheck.MISMATCH
+    return HeadCheck.MATCH
+
+
+def _problem(anchor: LedgerCheck | None, result: VerifyResult, head_check: HeadCheck) -> str | None:
     if not result.valid:
         return (
             f"the chain is broken at entry {result.first_mismatch} "
             f"({result.entries_checked} entries checked)"
         )
-    if anchor is None or anchor.head_seq == 0:
+    if head_check is not HeadCheck.MISMATCH or anchor is None:
         return None
     if result.head_seq < anchor.head_seq:
         return (
             f"entries removed from the end: the last passing check ended at entry "
             f"{anchor.head_seq}, the chain now ends at {result.head_seq}"
         )
-    if _entry_hash_at(uow, anchor.head_seq) != anchor.head_hash:
-        return (
-            f"entry {anchor.head_seq} no longer has the hash recorded by the last passing "
-            "check (the end of the chain was replaced)"
-        )
-    return None
+    return (
+        f"entry {anchor.head_seq} no longer has the hash recorded by the last passing "
+        "check (the end of the chain was replaced)"
+    )
 
 
 def _alert_payload(check: LedgerCheck, anchor: LedgerCheck | None) -> dict[str, Any]:
@@ -104,6 +113,7 @@ def run_ledger_check(
     interval: timedelta,
     max_delay: timedelta,
     force: bool = False,
+    trigger: VerificationTrigger = VerificationTrigger.SCHEDULED,
 ) -> LedgerCheckResult | None:
     """Verify the ledger if the last check is at least `interval` old (or `force`). Returns
     None when no check was due."""
@@ -114,7 +124,8 @@ def run_ledger_check(
             return None
         anchor = uow.ledger_checks.latest_valid()
         result = verify_chain(_entries(uow))
-        problem = _problem(uow, anchor, result)
+        head_check = _head_check(uow, anchor, result)
+        problem = _problem(anchor, result, head_check)
         # One alert per incident: only when the previous check passed (or there was none).
         alert = problem is not None and (last is None or last.valid)
         check = LedgerCheck(
@@ -127,6 +138,8 @@ def run_ledger_check(
             first_mismatch=result.first_mismatch,
             problem=problem,
             alerted=alert,
+            trigger=trigger.value,
+            head_check=head_check.value,
         )
         uow.ledger_checks.add(check)
         if alert:

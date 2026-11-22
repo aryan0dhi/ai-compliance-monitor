@@ -42,6 +42,7 @@ TABLES = [
     "app_user",
     "monitored_system",
     "simulated_clock",
+    "reset_counter",
     "worker_heartbeat",
 ]
 

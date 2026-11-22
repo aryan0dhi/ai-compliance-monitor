@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     # Commit the image was built from (Dockerfile GIT_SHA build arg); shown on GET /v1/meta.
     git_sha: str = "unknown"
+    # Release label reported by /healthz as `version` (contract delta A1); null when unset.
+    app_version: str | None = None
 
     # /v1/test/* routes (pod contract, Section 5). Must stay off in production.
     enable_test_routes: bool = False

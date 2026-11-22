@@ -1,6 +1,7 @@
 """Shared error types and handlers."""
 
 import logging
+import re
 from enum import StrEnum
 from typing import Any
 
@@ -78,6 +79,22 @@ def http_error(status_code: int, exc: Exception) -> StarletteHTTPException:
     return StarletteHTTPException(status_code, str(exc))
 
 
+_HTTP_METHODS = {"get", "put", "post", "delete", "options", "head", "patch", "trace"}
+
+
+def _allowed_methods(request: Request) -> str:
+    """Every method the API documents for this path. Starlette's 405 names only the first
+    route's methods, which is wrong when GET and POST are separate routes on one path (\u03945).
+    Taken from the app's own OpenAPI document, which lists every mounted operation."""
+    path = request.url.path
+    methods: set[str] = set()
+    for template, operations in request.app.openapi().get("paths", {}).items():
+        pattern = "^" + re.sub(r"\\\{[^/]+?\\\}", "[^/]+", re.escape(template)) + "$"
+        if re.match(pattern, path):
+            methods |= {m.upper() for m in operations if m in _HTTP_METHODS}
+    return ", ".join(sorted(methods))
+
+
 def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(UnimplementedError)
     async def _unimplemented(_: Request, exc: UnimplementedError) -> JSONResponse:
@@ -97,12 +114,15 @@ def register_error_handlers(app: FastAPI) -> None:
 
     # Every HTTP error, including 404 for an unknown route and 405, is {"detail": <str>} (B-22).
     @app.exception_handler(StarletteHTTPException)
-    async def _http_error(_: Request, exc: StarletteHTTPException) -> JSONResponse:
+    async def _http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
         code = exc.error_code if isinstance(exc, CodedHTTPException) else None
+        headers = exc.headers
+        if exc.status_code == 405:
+            headers = {**(headers or {}), "Allow": _allowed_methods(request)}
         return JSONResponse(
             status_code=exc.status_code,
             content=error_body(exc.detail, code),
-            headers=exc.headers,
+            headers=headers,
         )
 
     @app.exception_handler(Exception)

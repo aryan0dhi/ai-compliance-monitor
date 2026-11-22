@@ -690,6 +690,31 @@ UTF-8 URL. The URL itself never enters the ledger. The delta changes `url` to `u
 entry our ledger didn't have before, so for us the whole entry is new; the other payload fields
 are our choice (migration 0015).
 
+**\u03945 (verification runs), implemented.**
+- `GET /v1/ledger/verifications`: every run, scheduled or manual, newest first, as a bare
+  array. Readers: viewer, reviewer and (our D-13 reader set) admin; system keys `403`.
+- `POST /v1/ledger/verifications`: reviewer only. Verifies the whole chain now, exactly like the
+  daily check (#71), and returns `201` with the run, `trigger: MANUAL`. A failing run alerts as
+  a scheduled one does (D-27). It counts as the latest check, so the next scheduled run is a day
+  after it.
+- A run (our field names; the delta names only `trigger`, and A1 names `finished_at`, `valid`,
+  `head_check`): `{verification_id, trigger, finished_at, valid, entries_checked,
+  first_mismatch, head_seq, head_hash, head_check, problem}`.
+- `head_check` (our reading): `MATCH`, `MISMATCH` (entries removed from or replaced at the end
+  since the last passing run) or `NO_ANCHOR` (no earlier passing run); null for runs before
+  migration 0016.
+
+**A1 (`/healthz` fields), implemented.** The body adds `version` (`APP_VERSION`, null when
+unset), `last_verification` (`{finished_at, valid, head_check}` of the newest run of any
+trigger, or null), `last_verification_age_seconds` (whole wall-clock seconds, never negative,
+since the run time is on the service clock) and `reset_count` (0 before the first reset). The
+`503` body has the same keys: `version` from the environment, the other three null. Ledger
+integrity never makes `/healthz` 503. `reset_counter` (migration 0016) holds the count, outside
+the tables a reset truncates; each reset adds one.
+
+**405 `Allow` header.** A path with separate GET and POST routes (`/v1/ledger/verifications`)
+now lists both in `Allow`, taken from the API's own OpenAPI document.
+
 **Open input "viewer writes", not implemented.** The delta notes that viewers may call
 `POST /v1/webhooks` and the test endpoints. Here they stay admin-only (D-13): Phase 2 §5.1 says
 viewers "can read events/audit/ledger but not write", and opening them would let a viewer send

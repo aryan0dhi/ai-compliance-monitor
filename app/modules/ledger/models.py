@@ -74,6 +74,21 @@ class LedgerEntry(Base):
     entry_hash: Mapped[str]
 
 
+class VerificationTrigger(StrEnum):
+    """What started a ledger verification run (contract delta \u03945; D-29)."""
+
+    SCHEDULED = "SCHEDULED"  # the worker's daily check (#71)
+    MANUAL = "MANUAL"  # POST /v1/ledger/verifications by a reviewer
+
+
+class HeadCheck(StrEnum):
+    """How the chain's end compared with the head of the last passing run (D-14, D-27)."""
+
+    MATCH = "MATCH"  # that entry still exists with the recorded hash
+    MISMATCH = "MISMATCH"  # entries were removed from, or replaced at, the end
+    NO_ANCHOR = "NO_ANCHOR"  # no earlier passing run to compare with
+
+
 class LedgerCheck(Base):
     """One scheduled verification of the whole chain by the worker (REQ-06, Model 5 Ex-5, #71).
 
@@ -90,6 +105,8 @@ class LedgerCheck(Base):
         # A check fails exactly when it names the problem it found.
         CheckConstraint("valid = (problem IS NULL)", name="valid_iff_no_problem"),
         CheckConstraint("NOT (valid AND alerted)", name="only_failures_alert"),
+        check_in("trigger", VerificationTrigger, name="trigger"),
+        check_in("head_check", HeadCheck, name="head_check"),
         Index("ix_ledger_check_checked_at", "checked_at"),
     )
 
@@ -106,3 +123,7 @@ class LedgerCheck(Base):
     problem: Mapped[str | None]
     # A ledger_alert was queued: the first failure after a passing check (one per incident).
     alerted: Mapped[bool]
+    # Contract delta \u03945: SCHEDULED or MANUAL. Rows before migration 0016 are SCHEDULED.
+    trigger: Mapped[str] = mapped_column(server_default=VerificationTrigger.SCHEDULED.value)
+    # Null for rows written before migration 0016.
+    head_check: Mapped[str | None]
