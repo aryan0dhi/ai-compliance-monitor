@@ -146,6 +146,16 @@ their server under coverage (as in section 3) during our run and share the figur
 
 ## 2a. Tester service: `/test/setup`, `/test/run`, `/test/report`
 
+**Phase 5 coverage in the suite report (D-31).**
+- `component` counts the 17 pod-interface operations up to Phase 5, and `system` counts AC-01 to
+  AC-18.
+- `model` counts our 18 design requirements, with the mapping in
+  [model-coverage.md](testing-interface/model-coverage.md). It is included **only when the
+  target is our own system** (`TESTER_SELF_URLS`) and omitted from cross-team reports.
+- An item counts once if a test that **passed or failed** evaluated it; errors and skips
+  evaluate nothing.
+- A Model 5 scenario counts only the steps the target's `GET /v1/meta` phases let it run.
+
 The course interface's tester side wraps the same contract suite in an HTTP service that
 graders can call. It's a separate app (`tester/`, `uvicorn tester.main:app`), served at
 `<base URL>/tester` on the test deployment and on port 8100 locally

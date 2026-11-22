@@ -32,7 +32,13 @@ from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 from tester.runner import SuiteRun, run_suite
-from tests.contract.scope import ENDPOINTS, PHASE3_ACS
+from tests.contract.scope import (
+    ACCEPTANCE_CRITERIA,
+    COMPONENTS,
+    DESIGN_REQUIREMENTS,
+    DESIGN_VERSION,
+    MODEL_MAPPING,
+)
 
 logger = logging.getLogger("tester")
 
@@ -95,15 +101,21 @@ def get_runner() -> Runner:
     return lambda target, overrides: run_suite(target, overrides=overrides, timeout_s=RUN_TIMEOUT_S)
 
 
-def self_target_overrides(target_url: str) -> dict[str, str]:
-    """Webhooks on for our own deployment, whose API can reach this container's receiver."""
-    receiver = os.environ.get("TESTER_SELF_RECEIVER_URL")
+def is_own_system(target_url: str) -> bool:
+    """Whether the target is our own team's system (TESTER_SELF_URLS): only then does the suite
+    report carry coverage.model (testing interface, Phase 5)."""
     self_urls = {
         u.strip().rstrip("/").lower()
         for u in os.environ.get("TESTER_SELF_URLS", "").split(",")
         if u.strip()
     }
-    if not receiver or target_url.lower() not in self_urls:
+    return target_url.rstrip("/").lower() in self_urls
+
+
+def self_target_overrides(target_url: str) -> dict[str, str]:
+    """Webhooks on for our own deployment, whose API can reach this container's receiver."""
+    receiver = os.environ.get("TESTER_SELF_RECEIVER_URL")
+    if not receiver or not is_own_system(target_url):
         return {}
     return {
         "CONTRACT_WEBHOOKS": "on",
@@ -209,25 +221,57 @@ def _target_build(client: httpx.Client, session: Session) -> str | None:
     return build if _non_empty_str(build) else None
 
 
+# Outcomes that mean a test evaluated what it covers: coverage is about what was tested,
+# results about whether the system behaved (testing interface, "Coverage fields").
+EVALUATED = ("pass", "fail")
+
+
 def _scope_coverage(run: SuiteRun, key: str, universe: list[str], what: str) -> dict[str, Any]:
     outcomes = {r["test_id"]: r["outcome"] for r in run.results}
     covered = {
         tag
         for test in run.planned
-        if outcomes.get(test.test_id) == "pass"
-        for tag in getattr(test, key)
+        if outcomes.get(test.test_id) in EVALUATED
+        for tag in run.tags(test, key)
         if tag in universe
     }
     return {
         "covered": len(covered),
         "total": len(universe),
-        "basis": f"{what} with at least one passing test (tags from the suite's @covers)",
+        "basis": f"{what}, each counted once if a test that passed or failed evaluated it "
+        "(tests declare what they exercise with @covers; a Model 5 scenario counts only the "
+        "steps the target's phases let it run). Errors and skips evaluate nothing.",
     }
 
 
 def build_report(
     session: Session, run: SuiteRun, code: dict[str, Any], target_build: str | None = None
 ) -> dict[str, Any]:
+    coverage: dict[str, Any] = {
+        "code": code,
+        "component": _scope_coverage(
+            run,
+            "endpoints",
+            COMPONENTS,
+            "Operations of the pod interface up to Phase 5 (docs/pod-interface/openapi.yaml)",
+        ),
+        "system": _scope_coverage(
+            run,
+            "acs",
+            ACCEPTANCE_CRITERIA,
+            "Acceptance criteria AC-01 to AC-18 of the pod specification (Phase 2 §6.2), all in "
+            "scope for Phase 5",
+        ),
+    }
+    if is_own_system(session.target_url):
+        # Only when the tester tests its own team's system; cross-team reports omit it.
+        coverage["model"] = _scope_coverage(
+            run,
+            "model",
+            DESIGN_REQUIREMENTS,
+            f"Design requirements for Phase 5 from the {DESIGN_VERSION}: Model 1 states, "
+            f"Model 4 invariants and Model 5 examples; mapping to tests: {MODEL_MAPPING}",
+        )
     return {
         "session_id": session.session_id,
         "target_url": session.target_url,
@@ -235,15 +279,7 @@ def build_report(
         "finished_at": datetime.now(UTC).isoformat(),
         "aborted": run.aborted,
         "results": run.results,
-        "coverage": {
-            "code": code,
-            "component": _scope_coverage(
-                run, "endpoints", ENDPOINTS, "Phase 3 pod-interface endpoints (Section 5)"
-            ),
-            "system": _scope_coverage(
-                run, "acs", PHASE3_ACS, "Phase 3 acceptance criteria of the pod specification"
-            ),
-        },
+        "coverage": coverage,
     }
 
 

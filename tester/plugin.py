@@ -3,9 +3,13 @@
 Appends one JSON object per line to $TESTER_RESULTS_FILE as the run goes, so the results so far
 survive an abort:
 
-    {"kind": "planned", "test_id", "endpoints", "acs"}   every collected test, in run order
+    {"kind": "planned", "test_id", "endpoints", "acs", "model"}   every collected test, in order
     {"kind": "started", "test_id"}
-    {"kind": "result", "test_id", "outcome", "message", "source"?}
+    {"kind": "result", "test_id", "outcome", "message", "source"?, "covers"?}
+
+`covers` is what a test reports it actually evaluated (record_property("covers", ...)), which
+replaces its static @covers tags for coverage: a Model 5 scenario only evaluates the steps the
+target's phases allow (D-31).
 
 Outcomes are the interface's pass / fail / error / skip. A failed assertion is "fail". Any other
 exception is "error", with its source: the exception's `error_source` attribute if it has one
@@ -55,6 +59,9 @@ def pytest_collection_finish(session: pytest.Session) -> None:
                 "test_id": _test_id(item.nodeid),
                 "endpoints": _tags(item, "endpoints"),
                 "acs": _tags(item, "acs"),
+                # Design requirements (model coverage): Model 1 states, Model 4 invariants and
+                # Model 5 examples.
+                "model": _tags(item, "model1") + _tags(item, "model4") + _tags(item, "model5"),
             }
         )
 
@@ -86,6 +93,9 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
     outcome = yield
     report: pytest.TestReport = outcome.get_result()
     phases = _phases.setdefault(report.nodeid, {})
+    for name, value in report.user_properties:
+        if name == "covers" and isinstance(value, dict):
+            phases["covers"] = value
     if report.skipped:
         reason = report.longrepr[2] if isinstance(report.longrepr, tuple) else "skipped"
         phases.setdefault("result", ("skip", str(reason).removeprefix("Skipped: "), None))
@@ -97,7 +107,8 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
 
 
 def pytest_runtest_logfinish(nodeid: str, location: Any) -> None:
-    kind, message, source = _phases.get(nodeid, {}).get("result", ("pass", "passed", None))
+    recorded = _phases.get(nodeid, {})
+    kind, message, source = recorded.get("result", ("pass", "passed", None))
     record = {
         "kind": "result",
         "test_id": _test_id(nodeid),
@@ -106,4 +117,6 @@ def pytest_runtest_logfinish(nodeid: str, location: Any) -> None:
     }
     if source is not None:
         record["source"] = source
+    if "covers" in recorded:
+        record["covers"] = recorded["covers"]
     _emit(record)

@@ -17,7 +17,7 @@ from jsonschema_rs import Draft202012Validator
 
 from tester import main as tester_main
 from tester.runner import PlannedTest, SuiteRun, assemble, run_suite
-from tests.contract.scope import ENDPOINTS, PHASE3_ACS
+from tests.contract.scope import ACCEPTANCE_CRITERIA, COMPONENTS, DESIGN_REQUIREMENTS
 
 ROOT = Path(__file__).resolve().parents[1]
 DOC = yaml.safe_load(
@@ -361,9 +361,17 @@ def test_run_returns_and_stores_the_report(tester):
     ]
     coverage = report["coverage"]
     assert coverage["code"] == {"covered": 120, "total": 400, "basis": "line coverage"}
-    # Only t.py::a passed: its two endpoints and one AC.
-    assert (coverage["component"]["covered"], coverage["component"]["total"]) == (2, len(ENDPOINTS))
-    assert (coverage["system"]["covered"], coverage["system"]["total"]) == (1, len(PHASE3_ACS))
+    # t.py::a passed and t.py::b failed: both evaluated what they cover (3 endpoints, 2 ACs);
+    # the skipped t.py::c evaluated nothing.
+    assert (coverage["component"]["covered"], coverage["component"]["total"]) == (
+        3,
+        len(COMPONENTS),
+    )
+    assert (coverage["system"]["covered"], coverage["system"]["total"]) == (
+        2,
+        len(ACCEPTANCE_CRITERIA),
+    )
+    assert "model" not in coverage  # not our own system
     assert calls == [(TARGET, {})]
     report_request = target.requests[-1]
     assert report_request.url.path == "/test/report"
@@ -523,3 +531,140 @@ def test_targets_file_overrides_the_self_defaults(monkeypatch, tmp_path):
     monkeypatch.setenv("TESTER_TARGETS_FILE", str(targets))
     out = tester_main.target_overrides(SELF)
     assert out["CONTRACT_WEBHOOKS"] == "off" and out["CONTRACT_SYSTEM_KEY"] == "k"
+
+
+# --- Phase 5 coverage (testing interface "Coverage fields"; D-31) --------------------------------
+
+
+def test_errors_and_skips_evaluate_nothing():
+    planned = [
+        PlannedTest("t::pass", ["POST /v1/metrics"], ["AC-01"], ["FLAGGED"]),
+        PlannedTest("t::fail", ["GET /v1/events"], ["AC-02"], ["GAP_OPEN"]),
+        PlannedTest("t::error", ["GET /v1/ledger/verify"], ["AC-06"], ["INV-7"]),
+        PlannedTest("t::skip", ["POST /v1/webhooks"], ["AC-04"], ["Ex-1"]),
+    ]
+    results = [
+        {"test_id": t.test_id, "outcome": t.test_id.split("::")[1], "message": "m"} for t in planned
+    ]
+    run = SuiteRun(planned=planned, results=results)
+    session = tester_main.Session(session_id="s", target_url=TARGET)
+    coverage = tester_main.build_report(session, run, {"covered": None, "total": None,
+                                                         "basis": "x"})["coverage"]  # fmt: skip
+    assert coverage["component"]["covered"] == 2 and coverage["system"]["covered"] == 2
+
+
+def test_a_test_reports_what_it_evaluated():
+    """A scenario whose later steps were deferred covers only what its executed steps did."""
+    planned = [PlannedTest("t::scenario", ["POST /v1/metrics"], ["AC-03", "AC-13"], ["Ex-1"])]
+    results = [{"test_id": "t::scenario", "outcome": "pass", "message": "passed"}]
+    evaluated = {"t::scenario": {"acs": ["AC-03"], "endpoints": [], "model": ["FLAGGED"]}}
+    run = SuiteRun(planned=planned, results=results, evaluated=evaluated)
+    assert run.tags(planned[0], "acs") == ["AC-03"]
+    assert run.tags(planned[0], "endpoints") == []
+    assert run.tags(planned[0], "model") == ["FLAGGED"]
+
+
+def test_model_coverage_only_for_our_own_system(tester, monkeypatch):
+    client, *_ = tester
+    monkeypatch.setenv("TESTER_SELF_URLS", TARGET)
+    session_id = setup_session(client)
+    report = client.post("/test/run", json={"session_id": session_id}).json()
+    conforms(report, "TesterReport")
+    assert report_problems(report) == []
+    model = report["coverage"]["model"]
+    assert model["total"] == len(DESIGN_REQUIREMENTS)
+    assert "model-coverage.md" in model["basis"] and "Phase 4 design" in model["basis"]
+    monkeypatch.setenv("TESTER_SELF_URLS", "http://someone-else.test")
+    other = setup_session(client)
+    assert "model" not in client.post("/test/run", json={"session_id": other}).json()["coverage"]
+
+
+def test_the_runner_reads_reported_covers(tmp_path):
+    records = [
+        {"kind": "planned", "test_id": "t::a", "endpoints": [], "acs": ["AC-03"], "model": []},
+        {"kind": "started", "test_id": "t::a"},
+        {
+            "kind": "result",
+            "test_id": "t::a",
+            "outcome": "pass",
+            "message": "passed",
+            "covers": {"acs": ["AC-03"], "endpoints": ["POST /v1/metrics"], "model": ["Ex-1"]},
+        },
+    ]
+    run = assemble(records, None)
+    assert run.results == [{"test_id": "t::a", "outcome": "pass", "message": "passed"}]
+    assert run.evaluated["t::a"]["model"] == ["Ex-1"]
+
+
+def test_components_are_the_pod_interface_operations_up_to_phase_5():
+    pod = yaml.safe_load((ROOT / "docs/pod-interface/openapi.yaml").read_text(encoding="utf-8"))
+    ops = {
+        f"{method.upper()} {path}".replace("{event_id}", "{id}").replace("{report_id}", "{id}")
+        for path, item in pod["paths"].items()
+        for method, op in item.items()
+        if isinstance(op, dict) and op.get("x-phase", 99) <= 5
+    }
+    assert set(COMPONENTS) == ops and len(COMPONENTS) == len(ops)
+
+
+def test_the_model_mapping_lists_exactly_the_design_requirements():
+    table = (ROOT / "docs/testing-interface/model-coverage.md").read_text(encoding="utf-8")
+    listed = [
+        line.split("|")[1].strip()
+        for line in table.splitlines()
+        if line.startswith("| ") and not line.startswith(("| Requirement", "| ---"))
+    ]
+    assert listed == DESIGN_REQUIREMENTS
+
+
+def test_every_design_requirement_is_declared_by_some_test():
+    """Static @covers tags or a scenario step's expected state (scenarios.evaluated_tags)."""
+    from tests.contract import test_contract
+    from tests.contract.fixtures import load_fixtures
+
+    declared = set()
+    for obj in vars(test_contract).values():
+        for mark in getattr(obj, "pytestmark", []):
+            if mark.name == "covers":
+                for key in ("model1", "model4", "model5"):
+                    declared |= set(mark.kwargs.get(key, []))
+    for scenario in load_fixtures().scenarios.values():
+        declared |= {s.expect.get("state") for s in scenario.steps if s.expect.get("state")}
+    assert set(DESIGN_REQUIREMENTS) <= declared, set(DESIGN_REQUIREMENTS) - declared
+
+
+def test_step_coverage_follows_the_executed_steps():
+    from tests.contract.fixtures import load_fixtures
+    from tests.contract.scenarios import evaluated_tags
+
+    ex1 = load_fixtures().scenarios["Ex-1"]
+    phase3 = [s for s in ex1.steps if s.phase == 3]
+    later = [s for s in ex1.steps if s.phase > 3]
+    tags = evaluated_tags("Ex-1", phase3, later)
+    assert tags["acs"] == ["AC-03", "AC-04", "AC-15"]
+    assert "Ex-1" not in tags["model"] and "FLAGGED" in tags["model"]
+    everything = evaluated_tags("Ex-1", ex1.steps, [])
+    assert {"AC-10", "AC-11", "AC-12", "AC-13", "AC-17"} <= set(everything["acs"])
+    assert "Ex-1" in everything["model"] and "GET /v1/events/{id}/report" in everything["endpoints"]
+    assert set(everything["acs"]) <= set(ACCEPTANCE_CRITERIA)
+    assert set(everything["endpoints"]) <= set(COMPONENTS)
+
+
+def test_a_recorded_covers_reaches_the_runner(tmp_path):
+    """The real plugin: record_property("covers", ...) replaces the static tags."""
+    suite = write_suite(
+        tmp_path,
+        """
+        import pytest
+
+
+        @pytest.mark.covers(acs=["AC-03", "AC-13"], model5=["Ex-1"])
+        def test_partly(record_property):
+            record_property("covers", {"acs": ["AC-03"], "endpoints": [], "model": ["FLAGGED"]})
+        """,
+    )
+    run = run_suite(TARGET, suite=suite, timeout_s=120)
+    (test,) = run.planned
+    assert test.model == ["Ex-1"]  # static, from @covers
+    assert run.tags(test, "acs") == ["AC-03"] and run.tags(test, "model") == ["FLAGGED"]
+    assert "covers" not in run.results[0]

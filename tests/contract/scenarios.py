@@ -56,6 +56,58 @@ def dotted(document: dict, path: str) -> Any:
     return value
 
 
+# What each executed step evaluates, for the tester's coverage (scope.py; D-31). The pod's
+# acceptance criteria a step checks, by scenario and step id (Phase 2 §6.2):
+STEP_ACS: dict[tuple[str, str], list[str]] = {
+    ("Ex-1", "breach"): ["AC-03"],
+    ("Ex-1", "flagged"): ["AC-03"],
+    ("Ex-1", "flag-audited"): ["AC-15"],
+    ("Ex-1", "notified"): ["AC-04"],
+    ("Ex-1", "under-review"): ["AC-07"],
+    ("Ex-1", "assign-other-serious"): ["AC-11"],
+    ("Ex-1", "revise-to-death"): ["AC-10", "AC-11"],
+    ("Ex-1", "reminders"): ["AC-12"],
+    ("Ex-1", "report"): ["AC-13", "AC-17"],
+    ("Ex-2", "breach"): ["AC-03"],
+    ("Ex-2", "flagged"): ["AC-03"],
+    ("Ex-2", "blank-rationale"): ["AC-09"],
+    ("Ex-2", "not-serious"): ["AC-09"],
+    ("Ex-2", "no-report"): ["AC-09"],
+    ("Ex-4", "viewer-opens"): ["AC-15"],
+    ("Ex-4", "viewer-denied"): ["AC-14"],
+    ("Ex-4", "viewer-tier"): ["AC-14"],
+    ("Ex-4", "premature-report"): ["AC-08"],
+}
+# The pod-interface operations each action calls (scope.COMPONENTS names).
+ACTION_COMPONENTS: dict[str, list[str]] = {
+    "submit_metric": ["POST /v1/metrics"],
+    "get_event": ["GET /v1/events/{id}"],
+    "get_audit": ["GET /v1/events/{id}/audit"],
+    "await_webhook": ["POST /v1/webhooks"],
+    "await_reminders": ["POST /v1/webhooks"],
+    "attempt": ["POST /v1/webhooks", "POST /v1/metrics"],
+    "confirm_fields": [],  # the confirmations travel in the next disposition's body
+    "disposition": ["POST /v1/events/{id}/disposition"],
+    "get_report": ["GET /v1/events/{id}/report"],
+}
+
+
+def evaluated_tags(name: str, executed: list["Step"], deferred: list["Step"]) -> dict[str, list]:
+    """The ACs, components and design requirements the executed steps of a scenario evaluated.
+    A Model 5 example counts only when none of its steps was deferred."""
+    acs = {ac for step in executed for ac in STEP_ACS.get((name, step.id), [])}
+    components = {c for step in executed for c in ACTION_COMPONENTS.get(step.action, [])}
+    if any(step.phase >= 4 for step in executed):
+        components.add("POST /v1/test/clock/advance")  # travel_to before each later step
+    states = {
+        want for step in executed for want in [step.expect.get("state")] if isinstance(want, str)
+    }
+    if any(step.action == "attempt" for step in executed):
+        states.add("DENIED")
+    model = sorted(states) + ([] if deferred else [name])
+    return {"acs": sorted(acs), "endpoints": sorted(components), "model": model}
+
+
 def state_matches(want: str, got: str) -> bool:
     return got in SAME_AS.get(want, (want,))
 
@@ -113,6 +165,9 @@ class ScenarioRun:
         # confirm_fields steps collect here; the next disposition sends them (B-08).
         self.confirmations: dict[str, dict[str, str]] = {}
         self.history: list[dict] = []
+        # Steps that ran to completion, and the ones this target's phases deferred (D-31).
+        self.executed: list[Step] = []
+        self.deferred: list[Step] = []
         # Service-clock time of the scenario's first breach; step offsets ("at") count from it.
         self.start: datetime | None = None
 
@@ -178,13 +233,17 @@ class ScenarioRun:
         if setup := self.scenario.setup:
             other = self.fixtures.scenarios[setup["scenario"]]
             todo = [s for s in other.steps if s.id in setup["steps"]] + todo
+        self.deferred = deferred
         for step in todo:
             try:
                 if step.phase >= 4:
                     self.travel_to(step.at)
                 getattr(self, f"do_{step.action}")(step)
             except AssertionError as exc:
+                # A failed check still evaluated what it checks (outcome "fail", not "error").
+                self.executed.append(step)
                 raise AssertionError(f"{self.scenario.name} step {step.id}: {exc}") from exc
+            self.executed.append(step)
         return [f"{s.id} (phase {s.phase})" for s in deferred]
 
     def do_submit_metric(self, step: Step) -> None:

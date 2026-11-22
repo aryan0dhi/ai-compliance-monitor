@@ -37,6 +37,7 @@ final, because cross-team tests depend on them.
 | D-28 | REQ-16 erasure: what is personal data, when it is erased, how reads show it | Interim (team, #70, from Phase 2 Q7.1/Q7.2); **pod** to confirm the API field |
 | D-29 | The other team's Phase 5 contract delta (`delta.md`, Δ1–Δ11, A1–A7) | Agreed by both teams; implemented except viewer writes |
 | D-30 | The Δ1 report schema (`report.schema.json`, `pod-h-report-1`) and its PDF | Implemented (team) |
+| D-31 | Tester coverage for Phase 5 (testing interface "Coverage fields", `coverage.model`) | Implemented (team); the design-requirement list is ours to confirm |
 
 ## Agenda for the next pod meeting
 
@@ -856,3 +857,33 @@ This section records our choices where the schema leaves one, and what is still 
   Contact, address and product details are `not_available`. Everything that needs judgement is
   `requires_reviewer_input`. 4.2.b (the not-reportable rationale) is `not_available`, because
   NOT_SERIOUS events have no report here.
+
+## D-31: Tester coverage for Phase 5 (course testing interface, "Coverage fields")
+
+**Rule.** The testing interface asks every suite report for `code`, `component` and `system`
+coverage. From Phase 5 it also asks for `model`, but only when the tester tests its own team's
+system. Coverage is about what the suite *evaluated*; `results` say whether the system behaved.
+
+**Before.** Component and system coverage counted only tags of **passing** tests, against the
+Phase 3 lists (9 endpoints, 6 ACs). There was no `model` entry.
+
+**Now** (`tester/main.py`, `tests/contract/scope.py`):
+- `component`: the 17 pod-interface operations up to Phase 5 (`docs/pod-interface/openapi.yaml`;
+  a test keeps the two in step).
+- `system`: AC-01 to AC-18. Phase 2 §6.4 puts all of them in scope by Phase 5.
+- `model`: our 18 design requirements from the Phase 4 design: 8 Model 1 states, the 5 Model 4
+  invariants the design marks API-checkable, and the 5 Model 5 examples. The mapping to tests is
+  [`docs/testing-interface/model-coverage.md`](testing-interface/model-coverage.md). It is
+  included when the target is in `TESTER_SELF_URLS`, and omitted otherwise.
+- An item counts once when a test that **passed or failed** evaluated it.
+- A Model 5 scenario reports what its executed steps evaluated (`record_property("covers")`): the
+  ACs of each step (`STEP_ACS`), the operations it called, and the states it checked. The example
+  itself counts only when no step was deferred. Static `@covers` tags apply to every other test.
+
+**To confirm.**
+- The design-requirement list is the team's choice. It is one place to edit (`DESIGN_REQUIREMENTS`
+  in `scope.py`) if the team lists more (for example all thirteen Model 4 invariants) for this
+  milestone.
+- Δ5 and Δ6 (verification runs, erasure) are agreed but not yet in the pod interface's
+  `openapi.yaml`, so they aren't components here.
+
