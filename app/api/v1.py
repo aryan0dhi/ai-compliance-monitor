@@ -18,9 +18,9 @@ from app.modules.review.router import router as review_router
 from app.modules.testing.router import router as testing_router
 
 
-def build_router(*, include_test_routes: bool) -> APIRouter:
+def build_router(*, include_test_routes: bool, build: str = "unknown") -> APIRouter:
     router = APIRouter(prefix="/v1")
-    router.include_router(build_meta_router(test_routes=include_test_routes))
+    router.include_router(build_meta_router(test_routes=include_test_routes, build=build))
     router.include_router(auth_router)
     router.include_router(metrics_router)
     router.include_router(events_router)

@@ -212,6 +212,7 @@ class Target:
     def __init__(self) -> None:
         self.requests: list[httpx.Request] = []
         self.setup_response = None  # (status, json) or an exception; None echoes the id
+        self.meta_response: tuple | Exception = (200, {"phases": [3], "build": "abc123"})
         self.report_response = (
             200,
             {"coverage": {"code": {"covered": 120, "total": 400, "basis": "line coverage"}}},
@@ -227,6 +228,11 @@ class Target:
                 return httpx.Response(code, json=body) if body is not None else httpx.Response(code)
             sent = json.loads(request.content)
             return httpx.Response(201, json={"session_id": sent["session_id"]})
+        if request.url.path.endswith("/v1/meta"):
+            if isinstance(self.meta_response, Exception):
+                raise self.meta_response
+            code, body = self.meta_response
+            return httpx.Response(code, json=body)
         if request.url.path.endswith("/test/report"):
             if isinstance(self.report_response, Exception):
                 raise self.report_response
@@ -347,6 +353,7 @@ def test_run_returns_and_stores_the_report(tester):
     conforms(report, "TesterReport")
     assert report_problems(report) == []
     assert (report["session_id"], report["target_url"]) == (session_id, TARGET)
+    assert report["target_build"] == "abc123"
     assert report["aborted"] is None and [r["test_id"] for r in report["results"]] == [
         "t.py::a",
         "t.py::b",
@@ -365,6 +372,26 @@ def test_run_returns_and_stores_the_report(tester):
     stored = client.get("/test/report", params={"session_id": session_id})
     assert stored.status_code == 200 and stored.json() == report
     assert client.get("/test/report", params={"session_id": session_id}).json() == report
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        (404, {"detail": "Not Found"}),
+        (200, {"phases": [3]}),  # build is optional in the pod interface
+        (200, {"phases": [3], "build": ""}),
+        (200, ["not", "an", "object"]),
+        httpx.ConnectError("refused"),
+    ],
+)
+def test_target_build_is_null_when_the_target_has_none(tester, answer):
+    client, target, *_ = tester
+    target.meta_response = answer
+    session_id = setup_session(client)
+    report = client.post("/test/run", json={"session_id": session_id}).json()
+    conforms(report, "TesterReport")
+    assert report["target_build"] is None
+    assert report["coverage"]["code"]["covered"] == 120  # the run itself is unaffected
 
 
 def test_second_run_is_409_and_runs_nothing(tester):
