@@ -16,10 +16,10 @@ to [spec-decisions.md](spec-decisions.md).
 | `0008` | `reminder_percent`, `reminder_deadline_utc` on `notification` | REQ-11 (B-11, D-24) |
 | `0012` | `record_key`; `PERSONAL_DATA_ERASED` ledger entry type; seals existing personal text | REQ-16, REQ-05 (D-28) |
 | `0013` | `event_retention_guard` trigger on `event` | REQ-05, INV-10 (#69) |
-| `0014` | `RECORD_ERASED` ledger entry type | REQ-16, contract delta A4/\u03946 (D-29) |
-| `0015` | `WEBHOOK_REGISTERED` ledger entry type | REQ-14, contract delta \u03948 (D-29) |
-| `0016` | `trigger`, `head_check` on `ledger_check`; `reset_counter` | REQ-06, contract delta \u03945/A1 (D-29) |
-| `0017` | `report.id`; `report_submission` | REQ-12, contract delta \u03943/\u03944 (D-29) |
+| `0014` | `RECORD_ERASED` ledger entry type | REQ-16, contract delta A4/Δ6 (D-29) |
+| `0015` | `WEBHOOK_REGISTERED` ledger entry type | REQ-14, contract delta Δ8 (D-29) |
+| `0016` | `trigger`, `head_check` on `ledger_check`; `reset_counter` | REQ-06, contract delta Δ5/A1 (D-29) |
+| `0017` | `report.id`; `report_submission` | REQ-12, contract delta Δ3/Δ4 (D-29) |
 
 ## Diagram
 

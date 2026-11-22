@@ -67,7 +67,7 @@ def list_verifications_route(
     uow: UnitOfWork = Depends(get_uow),
 ) -> list[VerificationRunOut]:
     """Every ledger verification run, scheduled or manual, newest first (contract delta
-    \u03945). A bare array, like the audit trail."""
+    Δ5). A bare array, like the audit trail."""
     try:
         checks = list_verifications(principal=principal, uow=uow)
     except LedgerAccessDenied as exc:
@@ -91,7 +91,7 @@ def run_verification_route(
     clock: Clock = Depends(get_clock),
 ) -> VerificationRunOut:
     """Verify the whole chain now (trigger MANUAL), as the daily check does (contract delta
-    \u03945; REQ-06). A failed run alerts like a scheduled one (D-27)."""
+    Δ5; REQ-06). A failed run alerts like a scheduled one (D-27)."""
     try:
         check = run_verification(principal=principal, uow=uow, clock=clock)
     except VerificationRunDenied as exc:

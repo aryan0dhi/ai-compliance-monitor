@@ -36,11 +36,11 @@ class LedgerEntryType(StrEnum):
     PERSONAL_DATA_ERASED = "PERSONAL_DATA_ERASED"
     # An event's personal data was erased, on request (POST /v1/events/{id}/erasure) or at the
     # end of its retention period; payload `trigger` MANUAL or RETENTION (contract delta A4,
-    # \u03946; D-29). Replaces PERSONAL_DATA_ERASED, which stays valid for entries written
+    # Δ6; D-29). Replaces PERSONAL_DATA_ERASED, which stays valid for entries written
     # before migration 0014.
     RECORD_ERASED = "RECORD_ERASED"
     # An admin registered a webhook (POST /v1/webhooks). The payload has `url_sha256`, never the
-    # URL (contract delta \u03948; D-29). Not about an event, so event_id is null.
+    # URL (contract delta Δ8; D-29). Not about an event, so event_id is null.
     WEBHOOK_REGISTERED = "WEBHOOK_REGISTERED"
 
 
@@ -75,7 +75,7 @@ class LedgerEntry(Base):
 
 
 class VerificationTrigger(StrEnum):
-    """What started a ledger verification run (contract delta \u03945; D-29)."""
+    """What started a ledger verification run (contract delta Δ5; D-29)."""
 
     SCHEDULED = "SCHEDULED"  # the worker's daily check (#71)
     MANUAL = "MANUAL"  # POST /v1/ledger/verifications by a reviewer
@@ -123,7 +123,7 @@ class LedgerCheck(Base):
     problem: Mapped[str | None]
     # A ledger_alert was queued: the first failure after a passing check (one per incident).
     alerted: Mapped[bool]
-    # Contract delta \u03945: SCHEDULED or MANUAL. Rows before migration 0016 are SCHEDULED.
+    # Contract delta Δ5: SCHEDULED or MANUAL. Rows before migration 0016 are SCHEDULED.
     trigger: Mapped[str] = mapped_column(server_default=VerificationTrigger.SCHEDULED.value)
     # Null for rows written before migration 0016.
     head_check: Mapped[str | None]

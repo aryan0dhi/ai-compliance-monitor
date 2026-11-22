@@ -235,7 +235,7 @@ paths:
       description: |
         Reviewer keys only (REQ-13). `409 NO_DISPOSITION` while the event has no disposition
         (REQ-08a), `409` while its current tier isn't serious; the same bytes are returned on
-        every call once assembled (B-12). Contract delta \u03942 (agreed, D-29): `format=json|pdf`,
+        every call once assembled (B-12). Contract delta Δ2 (agreed, D-29): `format=json|pdf`,
         the `ETag`/`X-Report-*` headers, `410 RECORD_ERASED` after erasure. `format=pdf` is not
         implemented here yet (`501`).
       x-phase: 5
@@ -271,7 +271,7 @@ paths:
       operationId: submitReport
       summary: Record that the reviewer submitted a report version to the authority
       description: |
-        **Proposed** (contract delta \u03943, D-29). Reviewer keys only. Records a manual
+        **Proposed** (contract delta Δ3, D-29). Reviewer keys only. Records a manual
         submission of the event's current report version; sends nothing. The event's first
         submission is `INITIAL`, later ones `FOLLOW_UP`. 409 codes: `NOT_SUBMITTABLE` (no
         serious-tier determination), `REPORT_NOT_CURRENT`, `REPORT_HASH_MISMATCH`,
@@ -325,7 +325,7 @@ paths:
     get:
       tags: [reports]
       operationId: listReportVersions
-      summary: Every stored report version of the event (contract delta \u03944)
+      summary: Every stored report version of the event (contract delta Δ4)
       description: |
         **Proposed** (D-29). Reviewer or viewer keys. A bare array, oldest first; `status` is
         ASSEMBLED, SUBMITTED, SUPERSEDED or SUBMITTED_SUPERSEDED.
@@ -346,7 +346,7 @@ paths:
     get:
       tags: [reports]
       operationId: getReportVersion
-      summary: One stored report version, as assembled (contract delta \u03944)
+      summary: One stored report version, as assembled (contract delta Δ4)
       description: "**Proposed** (D-29). Reviewer keys only; 410 RECORD_ERASED after erasure."
       x-phase: 5
       x-reqs: [REQ-12, REQ-13]
@@ -544,7 +544,7 @@ components:
   responses:
     Gone:
       description: |
-        `RECORD_ERASED` (contract delta \u03947): the event's personal data was erased, so its
+        `RECORD_ERASED` (contract delta Δ7): the event's personal data was erased, so its
         reports are gone (REQ-16).
       content:
         application/json:
@@ -605,7 +605,7 @@ components:
         error_code:
           type: string
           description: |
-            **Proposed** (contract delta \u03947, D-29). A machine-readable code such as
+            **Proposed** (contract delta Δ7, D-29). A machine-readable code such as
             `MALFORMED_BODY`, `MALFORMED_QUERY` or `ALREADY_ERASED`. Present together with
             `message`, only on the errors the delta names.
         message:

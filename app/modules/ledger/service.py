@@ -85,7 +85,7 @@ def event_audit(event_id: UUID, *, principal: Principal, uow: UnitOfWork) -> lis
         return uow.ledger.for_event(event_id)
 
 
-# --- verification runs (contract delta \u03945; D-29) -----------------------------------------
+# --- verification runs (contract delta Δ5; D-29) -----------------------------------------
 
 # Who may start a run on request; reading runs is open to every reader role.
 VERIFICATION_RUNNERS = frozenset({Role.REVIEWER})

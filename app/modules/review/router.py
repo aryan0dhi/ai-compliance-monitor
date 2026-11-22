@@ -48,7 +48,7 @@ from app.modules.review.report_schemas import (
 from app.modules.review.schemas import DispositionIn
 
 router = APIRouter(prefix="/events", tags=["review"])
-# GET /v1/reports/{report_id} (contract delta \u03944).
+# GET /v1/reports/{report_id} (contract delta Δ4).
 reports_router = APIRouter(prefix="/reports", tags=["reports"])
 
 
@@ -152,7 +152,7 @@ def _report_errors(
 
 
 def report_headers(report: RevealedReport) -> dict[str, str]:
-    """Contract delta \u03942: which stored version this is, and its hash."""
+    """Contract delta Δ2: which stored version this is, and its hash."""
     return {
         "ETag": f'"{report.report_sha256}"',
         "X-Report-Id": str(report.report_id),
@@ -181,7 +181,7 @@ def get_report_route(
     event_id: str,
     report_format: Annotated[
         Literal["json", "pdf"],
-        Query(alias="format", description="json (default) or pdf (contract delta \u03942)"),
+        Query(alias="format", description="json (default) or pdf (contract delta Δ2)"),
     ] = "json",
     principal: Principal = Depends(get_principal),
     uow: UnitOfWork = Depends(get_uow),
@@ -202,7 +202,7 @@ def get_report_route(
             # The PDF layout comes from the delta's report.schema.json, which we don't have.
             raise HTTPException(
                 status.HTTP_501_NOT_IMPLEMENTED,
-                "PDF reports are not implemented yet (contract delta \u03942); use format=json",
+                "PDF reports are not implemented yet (contract delta Δ2); use format=json",
             )
         report = get_report(parsed_id, principal=principal, uow=uow, ledger=ledger, clock=clock)
     except (ReportDenied, EventNotFound, ReportUnavailable, RecordErased) as exc:
@@ -238,7 +238,7 @@ def submit_report_route(
     clock: Clock = Depends(get_clock),
 ) -> SubmissionOut:
     """Record that the reviewer submitted a report version to the authority (contract delta
-    \u03943). Nothing is sent: the submission itself happens outside the system."""
+    Δ3). Nothing is sent: the submission itself happens outside the system."""
     parsed_id = to_internal_id(event_id)
     try:
         authorize_report(principal)
@@ -283,7 +283,7 @@ def list_report_versions_route(
     uow: UnitOfWork = Depends(get_uow),
 ) -> list[ReportVersionOut]:
     """Every stored report version of the event, oldest first, with its status (contract delta
-    \u03944). A bare array, like the audit trail."""
+    Δ4). A bare array, like the audit trail."""
     try:
         parsed_id = to_internal_id(event_id)
         if parsed_id is None:
@@ -324,7 +324,7 @@ def get_report_version_route(
     uow: UnitOfWork = Depends(get_uow),
     ledger: LedgerWriter = Depends(get_ledger),
 ) -> Response:
-    """One stored report version, byte for byte as assembled (contract delta \u03944)."""
+    """One stored report version, byte for byte as assembled (contract delta Δ4)."""
     try:
         authorize_report(principal)
         parsed_id = to_internal_id(report_id)

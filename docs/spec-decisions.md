@@ -35,7 +35,8 @@ final, because cross-team tests depend on them.
 | D-26 | Which refused calls the audit trail records (Model 5 Ex-4) | Interim (team, #67); **pod** to confirm |
 | D-27 | Scheduled ledger check and its alert (Model 5 Ex-5) | Interim (team, #71); **pod** to confirm the alert format |
 | D-28 | REQ-16 erasure: what is personal data, when it is erased, how reads show it | Interim (team, #70, from Phase 2 Q7.1/Q7.2); **pod** to confirm the API field |
-| D-29 | The other team's Phase 5 contract delta (`delta.md`, Δ1–Δ11, A1–A7) | Agreed by both teams; implemented except \u03941/PDF (no schema) and viewer writes |
+| D-29 | The other team's Phase 5 contract delta (`delta.md`, Δ1–Δ11, A1–A7) | Agreed by both teams; implemented except Δ1 (report schema, in progress: D-30), PDF and viewer writes |
+| D-30 | The Δ1 report schema (`report.schema.json`, `pod-h-report-1`) | In progress (team) |
 
 ## Agenda for the next pod meeting
 
@@ -652,10 +653,10 @@ whether deleting rows after retention (#69) is wanted at all once personal data 
 **Source.** The other team's `delta.md` (status "proposed"). Our team accepted it on 2026-11-22,
 including its three open inputs. Per the delta, every row needs both teams' agreement and a
 **Change** row also needs the instructor's sign-off. We don't have the shared contract text the
-delta modifies or its `report.schema.json`, so where the delta is silent we keep our own behaviour
-and record it here.
+delta modifies (its `report.schema.json` came later: D-30), so where the delta is silent we
+keep our own behaviour and record it here.
 
-**Error codes (\u03947), implemented.**
+**Error codes (Δ7), implemented.**
 - Errors the delta names carry `error_code` and `message` **next to** the existing `detail`
   (B-22), so clients reading either shape keep working. `message` repeats the text.
 - Coded today: every `400` (`MALFORMED_QUERY` when a query parameter is invalid, otherwise
@@ -670,7 +671,7 @@ and record it here.
 data of this event has been erased"). It is checked after the role (`403`), the body (`400`) and
 the event (`404`), and before the monitoring-gap check (the delta's `EVENT_NOT_REVIEWABLE`).
 
-**\u03946 and A4 (erasure on request, `RECORD_ERASED`), implemented.**
+**Δ6 and A4 (erasure on request, `RECORD_ERASED`), implemented.**
 - `POST /v1/events/{event_id}/erasure`: reviewer only (`403` otherwise); body empty or `{}`
   (else `400 MALFORMED_BODY`); `404` unknown event; `409 RETENTION_NOT_EXPIRED` before
   `retain_until`; `409 ALREADY_ERASED`. `200 {event_id, erased_at, erased_fields}`.
@@ -683,14 +684,14 @@ the event (`404`), and before the monitoring-gap check (the delta's `EVENT_NOT_R
   `PERSONAL_DATA_ERASED` stays valid for older entries.
 - Refused erasure calls are not ledgered (D-26 covers disposition and report calls only).
 
-**\u03948 (`WEBHOOK_REGISTERED`), implemented.** `POST /v1/webhooks` now appends one
+**Δ8 (`WEBHOOK_REGISTERED`), implemented.** `POST /v1/webhooks` now appends one
 `WEBHOOK_REGISTERED` ledger entry (actor: the admin; no event) with payload
 `{webhook_id, url_sha256, event_types}`, where `url_sha256` is the lowercase hex SHA-256 of the
 UTF-8 URL. The URL itself never enters the ledger. The delta changes `url` to `url_sha256` in an
 entry our ledger didn't have before, so for us the whole entry is new; the other payload fields
 are our choice (migration 0015).
 
-**\u03945 (verification runs), implemented.**
+**Δ5 (verification runs), implemented.**
 - `GET /v1/ledger/verifications`: every run, scheduled or manual, newest first, as a bare
   array. Readers: viewer, reviewer and (our D-13 reader set) admin; system keys `403`.
 - `POST /v1/ledger/verifications`: reviewer only. Verifies the whole chain now, exactly like the
@@ -715,7 +716,7 @@ the tables a reset truncates; each reset adds one.
 **405 `Allow` header.** A path with separate GET and POST routes (`/v1/ledger/verifications`)
 now lists both in `Allow`, taken from the API's own OpenAPI document.
 
-**\u03943 and \u03944 (submissions and report versions), implemented.**
+**Δ3 and Δ4 (submissions and report versions), implemented.**
 - Each stored report version has a `report_id` (migration 0017; existing reports get one).
 - `GET /v1/events/{event_id}/reports` (reviewer or viewer; admin and system keys `403`): a
   bare array, oldest first, of `{report_id, event_id, report_version, status, assembled_at,
@@ -733,20 +734,18 @@ now lists both in `Allow`, taken from the API's own OpenAPI document.
   event's versions); `410 RECORD_ERASED`; `409 NOT_SUBMITTABLE` (no serious-tier
   determination now); `REPORT_NOT_CURRENT`; `REPORT_HASH_MISMATCH`; `REPORT_ALREADY_SUBMITTED`.
 - `authority_reference` is not treated as personal data (D-28), so it isn't sealed.
-- Not changed here (\u03942 is a Change row): `GET /v1/events/{event_id}/report` still answers
-  `409` after erasure and has no `format`/`X-Report-*` headers.
+- `GET /v1/events/{event_id}/report` itself changed with the Change rows below (#83).
 
-**Change rows (\u03942, \u03949, A2, A3, A5, A6): implemented (#83).** Both teams agreed. Our team
+**Change rows (Δ2, Δ9, A2, A3, A5, A6): implemented (#83).** Both teams agreed. Our team
 read the Phase 5 instructions as requiring instructor sign-off only for changes to the shared
 project scope; #83 was checked to leave every Phase 2 requirement and acceptance criterion
 unchanged (scope check on the PR) and merged on that basis.
-- \u03942 `GET /v1/events/{event_id}/report`: `409 NO_DISPOSITION` before any disposition;
+- Δ2 `GET /v1/events/{event_id}/report`: `409 NO_DISPOSITION` before any disposition;
   `410 RECORD_ERASED` after erasure (was `409`); `ETag`, `X-Report-Id`, `X-Report-Version`
   (the disposition number) and `X-Report-Sha256` on `200` (also on `GET /v1/reports/{id}`);
-  `format=json` (default). `format=pdf` answers `501`: the PDF follows the delta's
-  `report.schema.json` (\u03941), which we don't have. A current tier of NOT_SERIOUS stays an uncoded
-  `409`: the delta's not-serious closure report is part of \u03941.
-- \u03949 / A2: `POST /v1/test/clock/advance` is `400` if it would move the simulated time to or past
+  `format=json` (default). `format=pdf` answers `501`: the PDF is of the Δ1 report (D-30).
+  A current tier of NOT_SERIOUS stays an uncoded `409` (Phase 2 Model 5 Ex-2; D-30).
+- Δ9 / A2: `POST /v1/test/clock/advance` is `400` if it would move the simulated time to or past
   `9999-07-01T00:00:00Z`; `POST /v1/metrics` is `400 MALFORMED_BODY` for a `timestamp` at or after
   it.
 - A3: sealed values are `pd1:` followed by the sealed value (was `enc:v1:`, which still opens).
@@ -757,7 +756,7 @@ unchanged (scope check on the PR) and merged on that basis.
 - A6: reset already empties every Phase 5 table and keeps `reset_count` + 1; the deadlock retry
   (`500` after three) is not built: our reset is one transaction.
 
-**Not implemented (blocked).** \u03941 and PDF reports need `report.schema.json`.
+**Not implemented yet.** Δ1 and PDF reports: see D-30.
 
 **Open input "viewer writes", not implemented.** The delta notes that viewers may call
 `POST /v1/webhooks` and the test endpoints. Here they stay admin-only (D-13): Phase 2 §5.1 says
@@ -772,3 +771,9 @@ trigger irreversible erasure (REQ-16). Changing it needs instructor sign-off.
 - **Health endpoint.** `/healthz` reports `database` and `worker` (`ok` / `stale` / `missing`,
   from the heartbeat). Only an unreachable database returns `503`, because restarting the API
   container can't fix a stopped worker.
+
+## D-30: The Δ1 report schema (REQ-12, AC-13, contract delta Δ1)
+
+**Source.** The other team's `report.schema.json` (`pod-h-report-1`, JSON Schema 2020-12), received
+after D-29. Our implementation choices, and what it still lacks, are recorded here as they land.
+Until then `GET /v1/events/{event_id}/report` serves the D-25 document.

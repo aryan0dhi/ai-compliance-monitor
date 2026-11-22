@@ -34,7 +34,7 @@ from tests.integration.test_report_pg import (  # noqa: F401 - fixtures
 RATIONALE = "spoke with the applicant, Ms Example, on 2026-09-28"
 EVIDENCE = "applicant Mr Sample was refused credit twice"
 # A Phase 4 submission note (POST .../report/submission no longer takes one since contract
-# delta \u03943); only the 0012 migration test still writes one, straight into the table.
+# delta Δ3); only the 0012 migration test still writes one, straight into the table.
 NOTE = "submitted by J. Doe via the authority's portal"
 SECRETS = (RATIONALE, EVIDENCE)
 FIELDS = {**EX1_FIELDS, "fundamental_rights": {"status": "CONFIRMED", "evidence": EVIDENCE}}
@@ -92,7 +92,7 @@ def test_ac18_erasure_keeps_every_hash_and_the_chain_verifies(stack, clock):  # 
     assert event["revision_history"][0]["rationale"] is None
     assert event["personal_data_erased_at"] == due.isoformat().replace("+00:00", "Z")
     assert [a["action"] for a in stack.audit(event_id)][-2:] == ["RECORD_ERASED", "VIEW"]
-    assert stack.report(event_id).status_code == 410  # contract delta \u03942
+    assert stack.report(event_id).status_code == 410  # contract delta Δ2
 
 
 def test_erasure_runs_on_the_service_clock_only_after_retention(stack, clock):  # noqa: F811

@@ -327,7 +327,7 @@ class TestRegisterRoute:
         assert ping["secret"] == hook.secret
 
     def test_registration_is_audited_with_the_url_hash_only(self, api, ledger):
-        """Contract delta \u03948 (D-29): one WEBHOOK_REGISTERED entry, url_sha256 not url."""
+        """Contract delta Δ8 (D-29): one WEBHOOK_REGISTERED entry, url_sha256 not url."""
         client, _, state = api
         body = client.post("/v1/webhooks", json=self.BODY).json()
         (entry,) = ledger.calls

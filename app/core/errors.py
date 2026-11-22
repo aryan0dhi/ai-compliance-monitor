@@ -31,7 +31,7 @@ class UnimplementedError(NotImplementedError):
 
 
 class ErrorCode(StrEnum):
-    """Machine-readable error codes (Phase 5 contract delta \u03947; docs/spec-decisions.md D-29).
+    """Machine-readable error codes (Phase 5 contract delta Δ7; docs/spec-decisions.md D-29).
 
     Sent as `error_code` next to `detail`, with `message` repeating the text, for the errors the
     delta names. Other errors keep the plain `{"detail"}` body (B-22).
@@ -64,7 +64,7 @@ class CodedHTTPException(StarletteHTTPException):
 
 
 def error_body(detail: Any, error_code: ErrorCode | None = None, message: str | None = None):
-    """B-22 body, plus `error_code` and `message` when the error has a code (\u03947)."""
+    """B-22 body, plus `error_code` and `message` when the error has a code (Δ7)."""
     body: dict[str, Any] = {"detail": detail}
     if error_code is not None:
         body["error_code"] = error_code.value
@@ -85,7 +85,7 @@ _HTTP_METHODS = {"get", "put", "post", "delete", "options", "head", "patch", "tr
 
 def _allowed_methods(request: Request) -> str:
     """Every method the API documents for this path. Starlette's 405 names only the first
-    route's methods, which is wrong when GET and POST are separate routes on one path (\u03945).
+    route's methods, which is wrong when GET and POST are separate routes on one path (Δ5).
     Taken from the app's own OpenAPI document, which lists every mounted operation."""
     path = request.url.path
     methods: set[str] = set()

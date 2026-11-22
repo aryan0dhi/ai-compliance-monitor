@@ -504,7 +504,7 @@ class TestHttp:
         resp = http.post(event_id, body)
         assert resp.status_code == 400, resp.text
         body = resp.json()
-        # B-22 detail, plus the contract delta's \u03947 code (D-29).
+        # B-22 detail, plus the contract delta's Δ7 code (D-29).
         assert set(body) == {"detail", "error_code", "message"}
         assert body["error_code"] == "MALFORMED_BODY"
         assert_unchanged(uow, ledger, event_id)

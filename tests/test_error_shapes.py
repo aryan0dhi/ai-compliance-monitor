@@ -100,7 +100,7 @@ class TestErrorShapes:
         client, state = env
         state["principal"] = user_principal(Role.VIEWER)
         resp = check(client.get("/v1/events", params={"limit": SENTINEL}), 400)
-        # Contract delta \u03947 (D-29): a malformed query is coded MALFORMED_QUERY.
+        # Contract delta Δ7 (D-29): a malformed query is coded MALFORMED_QUERY.
         assert resp.json()["error_code"] == "MALFORMED_QUERY"
         assert resp.json()["message"] == "the query is malformed"
 
