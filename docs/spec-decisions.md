@@ -31,12 +31,12 @@ final, because cross-team tests depend on them.
 | D-22 | Disposition details B-08/B-09 leave open (blank rationale, history, re-confirmation, Ex-2) | Interim (team, #38); **pod** to confirm |
 | D-23 | Deadline details B-10 leaves open (which tier is stricter, A after NOT_SERIOUS, same tier) | Interim (team, #39); **pod** to confirm |
 | D-24 | Reminder details B-11 leaves open (catch-up, revisions, closing, payload) | Interim (team, #40); **pod** to confirm |
-| D-25 | Report details B-12 leaves open (revision after assembly, submission, audit) | Interim (team, #41); **pod** to confirm |
+| D-25 | Report details B-12 leaves open (revision after assembly, submission, audit) | Interim (team, #41); document shape superseded by D-30 |
 | D-26 | Which refused calls the audit trail records (Model 5 Ex-4) | Interim (team, #67); **pod** to confirm |
 | D-27 | Scheduled ledger check and its alert (Model 5 Ex-5) | Interim (team, #71); **pod** to confirm the alert format |
 | D-28 | REQ-16 erasure: what is personal data, when it is erased, how reads show it | Interim (team, #70, from Phase 2 Q7.1/Q7.2); **pod** to confirm the API field |
-| D-29 | The other team's Phase 5 contract delta (`delta.md`, Δ1–Δ11, A1–A7) | Agreed by both teams; implemented except Δ1 (report schema, in progress: D-30), PDF and viewer writes |
-| D-30 | The Δ1 report schema (`report.schema.json`, `pod-h-report-1`) | In progress (team) |
+| D-29 | The other team's Phase 5 contract delta (`delta.md`, Δ1–Δ11, A1–A7) | Agreed by both teams; implemented except PDF reports (D-30) and viewer writes |
+| D-30 | The Δ1 report schema (`report.schema.json`, `pod-h-report-1`) | Implemented (team); PDF not built |
 
 ## Agenda for the next pod meeting
 
@@ -534,7 +534,8 @@ both endpoints Phase 5; they are implemented now because they follow from #38.
   (tier, reviewer, rationale of the latest disposition), `detected_at`, `determination_at` (that
   disposition's `recorded_at`), `assembled_at` (service clock) and `deadline_utc`. The JSON text
   is stored and every later call returns it byte for byte, followed by `report_sha256` (sha256 of
-  the stored text) and `submitted_at`.
+  the stored text) and `submitted_at`. **Superseded by D-30:** the document is now
+  `pod-h-report-1`, served with nothing appended.
 - **Revision after assembly.** The report belongs to the determination it was assembled from. A
   revision gets its own report on its next request, with a new `assembled_at` and hash; the
   earlier report is kept (insert-only, `report` table) but no longer served. Neither D-03 state
@@ -756,7 +757,7 @@ unchanged (scope check on the PR) and merged on that basis.
 - A6: reset already empties every Phase 5 table and keeps `reset_count` + 1; the deadlock retry
   (`500` after three) is not built: our reset is one transaction.
 
-**Not implemented yet.** Δ1 and PDF reports: see D-30.
+**Not implemented yet.** PDF reports (D-30).
 
 **Open input "viewer writes", not implemented.** The delta notes that viewers may call
 `POST /v1/webhooks` and the test endpoints. Here they stay admin-only (D-13): Phase 2 §5.1 says
@@ -775,8 +776,49 @@ trigger irreversible erasure (REQ-16). Changing it needs instructor sign-off.
 ## D-30: The Δ1 report schema (REQ-12, AC-13, contract delta Δ1)
 
 **Source.** The other team's `report.schema.json` (`pod-h-report-1`, JSON Schema 2020-12), received
-after D-29. Our implementation choices, and what it still lacks, are recorded here as they land.
-Until then `GET /v1/events/{event_id}/report` serves the D-25 document.
+after D-29. Every report `GET /v1/events/{event_id}/report` assembles now validates against it.
+This section records our choices where the schema leaves one, and what is still missing.
+
+**Document (`app/modules/review/report_document.py`).**
+- Served exactly as stored at assembly. The D-25 `report_sha256` and `submitted_at` are no longer
+  appended, because the schema forbids extra keys. The hash is `X-Report-Sha256`, which is now
+  the SHA-256 of the body (it is also Δ3's `json_sha256`). Submission status is in the version
+  list (Δ4). Reports stored before this change keep their D-25 shape and are served as stored.
+- `report_kind` is always `SERIOUS_INCIDENT` and `submission_marking` is null. A NOT_SERIOUS
+  event still has no report (`409`), as in Phase 2 Model 5 Ex-2 and REQ-08a. The schema's
+  `NOT_SERIOUS_CLOSURE` branch is unused. Δ1 names that kind, but adopting it would change a
+  Phase 2 acceptance example, which is shared scope.
+- Ids: `report_id` is `rpt-` + the report UUID's hex, and `disposition_id` is
+  `dsp-<event hex>-<seq>`, both derived from stored keys (no migration). Inputs accept the `rpt-`
+  form and the UUID form served before.
+- `event`: the schema's nine fields. `evidence_bundle` is the Model 2 ±1 h window around the
+  triggering sample, ending at assembly if that is earlier (never before the breach). It holds
+  the same system and metric's samples, bounds included, and `evidence_sha256` is over its
+  canonical JSON. `event.evidence_bundle_hash` itself stays null (D-05).
+- `harm_fields`: the schema's names (`health_safety_harm`, `critical_infrastructure_disruption`,
+  `fundamental_rights_infringement`, `property_environmental_damage`) inside reports only.
+  Disposition requests and event responses keep the Phase 2 names.
+- `determination`:
+  - `assigned_at` is the current disposition's time;
+  - `tier_label` is a plain-English tier name with its Article 73 paragraph;
+  - `calendar` describes `deadlines.py` (UTC days of exactly 24 h; REQ-10's configurable
+    calendar isn't built);
+  - `revisions` lists every disposition after the first.
+- `timestamps.determined_at` is A, the first serious-tier disposition (the deadline's anchor,
+  D-23). `last_revised_at` is the current disposition's time after a revision, otherwise null.
+  `risk_indicator.detection_to_assignment_seconds` is A − `detected_at` in whole seconds
+  (REQ-15, AC-17).
+- `regulation.reporting_window_days`: 2, 10 or 15 by tier (`DEADLINE_DAYS`).
+- `ledger_anchor`: the newest ledger entry when the report was assembled. Its own
+  `REPORT_ASSEMBLED` entry, which carries the report's hash, comes after it. On an empty ledger
+  (only in unit tests) it is seq 0 and the genesis hash.
+
+**PDF (`format=pdf`), not built: still `501`.**
+- A PDF must show every value of the report faithfully. Reviewer evidence and rationales are free
+  Unicode text, which the built-in PDF fonts can't render, so faithful output needs a PDF library
+  and an embedded Unicode font. That is a new runtime dependency, to be added to the hash-pinned
+  lockfiles deliberately rather than as part of the schema change.
+- Phase 2 §6.4 also lists the PDF among the features that can be dropped (`phase5-progress.md`).
 
 - The schema is copied unchanged to [`pod-interface/report.schema.json`](pod-interface/report.schema.json).
   `tests/test_report_schema.py` validates served reports against it, plus the ordering

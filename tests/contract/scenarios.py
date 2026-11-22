@@ -5,10 +5,16 @@ steps up to the phases it provides (GET /v1/meta); later steps are reported as d
 skipped. Supporting Phase 4 means adding handlers here, not changing the tests.
 """
 
+import functools
+import hashlib
+import json
 import math
 import time
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
 
+import jsonschema_rs
 import pytest
 
 from tests.contract.fixtures import Fixtures, Scenario, Step, parse_duration
@@ -23,10 +29,31 @@ HARM_FIELDS = {
     "fundamental_rights",
     "property_environment",
 }
+# Inside a report the four fields carry the Δ1 schema's names (report.schema.json, D-30).
+REPORT_HARM_FIELDS = {
+    "health_safety_harm",
+    "critical_infrastructure_disruption",
+    "fundamental_rights_infringement",
+    "property_environmental_damage",
+}
+REPORT_SCHEMA_PATH = Path(__file__).resolve().parents[2] / "docs/pod-interface/report.schema.json"
 # A breach is FLAGGED until a webhook accepts its flag notification, then UNDER_REVIEW (D-21). With
 # webhooks registered that can happen within one worker pass, so a step that reads the state right
 # after the breach accepts either.
 SAME_AS = {"FLAGGED": ("FLAGGED", "UNDER_REVIEW")}
+
+
+@functools.cache
+def report_validator():
+    return jsonschema_rs.validator_for(json.loads(REPORT_SCHEMA_PATH.read_text(encoding="utf-8")))
+
+
+def dotted(document: dict, path: str) -> Any:
+    """`document["a"]["b"]` for "a.b" (fixtures name nested report fields this way)."""
+    value: Any = document
+    for part in path.split("."):
+        value = value.get(part) if isinstance(value, dict) else None
+    return value
 
 
 def state_matches(want: str, got: str) -> bool:
@@ -357,8 +384,8 @@ class ScenarioRun:
         )
 
     def do_get_report(self, step: Step) -> None:
-        """B-12 / AC-13: once a serious tier is assigned, the report of the current determination,
-        the same document on every call; before that (or after NOT_SERIOUS), 409."""
+        """B-12 / AC-13: once a serious tier is assigned, the report of the current determination
+        in the Δ1 schema, the same bytes on every call; before that (or after NOT_SERIOUS), 409."""
         key, want = self.key(step.actor), step.expect
         path = f"/v1/events/{self.event_id}/report"
         audit_before = self.audit() if "ledger_records_attempt" in want else None
@@ -373,21 +400,40 @@ class ScenarioRun:
             assert_error_body(resp)
             return
         report = resp.json()
+        # Δ1: the report follows the shared pod-h-report-1 schema (report.schema.json, D-30).
+        problems = [
+            f"{e.instance_path}: {e.message}" for e in report_validator().iter_errors(report)
+        ]
+        assert problems == [], problems
         for name in want.get("non_null", []):
-            assert report.get(name) is not None, (name, report)
+            assert dotted(report, name) is not None, (name, report)
         assert report["event"]["event_id"] == self.event_id, report["event"]
-        assert set(report["harm_fields"]) == HARM_FIELDS, report["harm_fields"]
+        assert set(report["harm_fields"]) == REPORT_HARM_FIELDS, report["harm_fields"]
         # The determination reported on is the event's current (latest) disposition.
         assert self.history, "get_report needs a serious disposition first"
-        current = self.history[-1]
-        assert report["determination"]["tier"] == current["tier"], report["determination"]
-        assert report["determination"]["reviewer_id"] == current["reviewer_id"]
-        assert parse(report["determination_at"]) == parse(current["recorded_at"])
-        assert parse(report["deadline_utc"]) == parse(current["deadline_utc"])
-        assert parse(report["detected_at"]) == parse(report["event"]["detected_at"])
-        assert parse(report["assembled_at"]) >= parse(report["determination_at"])
+        current, determination, times = (
+            self.history[-1],
+            report["determination"],
+            report["timestamps"],
+        )
+        assert determination["tier"] == current["tier"], determination
+        assert determination["reviewer_id"] == current["reviewer_id"]
+        assert parse(determination["assigned_at"]) == parse(current["recorded_at"])
+        assert parse(determination["deadline_utc"]) == parse(current["deadline_utc"])
+        # determined_at is A, the first serious determination (D-23, D-30).
+        first = next(d for d in self.history if d["tier"] != "NOT_SERIOUS")
+        assert parse(times["determined_at"]) == parse(first["recorded_at"])
+        assert parse(times["detected_at"]) == parse(report["event"]["detected_at"])
+        # The ordering the schema can't express (AC-13).
+        assert parse(times["detected_at"]) < parse(times["determined_at"])
+        assert parse(times["assembled_at"]) >= parse(determination["assigned_at"])
+        assert [(r["prior_tier"], r["new_tier"]) for r in determination["revisions"]] == [
+            (d["previous_tier"], d["tier"]) for d in self.history[1:]
+        ]
+        # Δ2: X-Report-Sha256 is the hash of the body; it is served byte for byte every time.
+        assert resp.headers["x-report-sha256"] == hashlib.sha256(resp.content).hexdigest()
         again = self.api.call("GET", path, as_=key)
-        assert again.status_code == 200 and again.json() == report, again.text
+        assert again.status_code == 200 and again.content == resp.content, again.text
 
 
 HANDLED_ACTIONS = frozenset(

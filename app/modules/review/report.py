@@ -23,6 +23,7 @@ from app.db.uow import UnitOfWork
 from app.modules.auth.interface import Principal, Role
 from app.modules.events.models import Event, EventType
 from app.modules.events.service import EventNotFound, EventRecord
+from app.modules.ledger.chain import GENESIS_HASH
 from app.modules.ledger.interface import LedgerEntryType, LedgerWriter
 from app.modules.records.service import (
     Vault,
@@ -32,6 +33,7 @@ from app.modules.records.service import (
     revealed_evidence,
     revealed_rationales,
 )
+from app.modules.review.evidence import build_evidence_bundle
 from app.modules.review.models import (
     Disposition,
     DispositionTier,
@@ -40,7 +42,8 @@ from app.modules.review.models import (
     ReportType,
     SubmissionKind,
 )
-from app.modules.review.report_schemas import RevealedReport, assemble_document, sha256_hex
+from app.modules.review.report_document import assemble_document
+from app.modules.review.report_schemas import RevealedReport, sha256_hex
 
 # B-13 / REQ-13: reports are for reviewers; viewers and admins get 403 like for dispositions.
 REPORT_ROLES = frozenset({Role.REVIEWER})
@@ -195,12 +198,33 @@ def get_report(
             rationales=revealed_rationales(vault, history),
             evidence=revealed_evidence(vault, harm_fields),
         )
-        document = assemble_document(record, assembled_at=now)
+        system = uow.systems.get(event.system_id)
+        metric_name, sampled_at = event.metric_name, event.metric_timestamp
+        if system is None or metric_name is None or sampled_at is None:  # pragma: no cover
+            raise ValueError("a threshold breach has its system, metric and sample")
+        evidence = build_evidence_bundle(
+            uow.metrics,
+            system_id=event.system_id,
+            metric_name=metric_name,
+            breach_at=sampled_at,
+            assembled_at=now,
+        )
+        head = uow.ledger.head()
+        report_id = uuid4()
+        document = assemble_document(
+            record,
+            report_id=report_id,
+            system_name=system.name,
+            evidence=evidence,
+            # The newest entry before this report's own REPORT_ASSEMBLED entry (D-30).
+            ledger_head=(head.seq, head.entry_hash) if head else (0, GENESIS_HASH),
+            assembled_at=now,
+        )
         sealed = vault.seal(report_purpose(current.seq), document)
         if sealed is None:  # pragma: no cover - a document is never None
             raise ValueError("an assembled report has text")
         report = Report(
-            id=uuid4(),
+            id=report_id,
             event_id=event.id,
             disposition_seq=current.seq,
             document=sealed,

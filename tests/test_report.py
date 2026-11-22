@@ -148,30 +148,43 @@ class TestAssembly:
         stored = report(uow, ledger, clock, disposed, reviewer)
 
         doc = json.loads(stored.document)
+        # Δ1 pod-h-report-1, in schema order (tests/test_report_schema.py validates it).
         assert list(doc) == [
+            "report_id",
+            "report_version",
+            "report_kind",
+            "schema_version",
             "event",
             "harm_fields",
             "determination",
-            "detected_at",
-            "determination_at",
-            "assembled_at",
-            "deadline_utc",
+            "timestamps",
+            "risk_indicator",
+            "regulation",
+            "submission_marking",
+            "article73_template",
+            "ledger_anchor",
         ]
         assert doc["event"]["event_id"] == str(disposed)
-        assert doc["event"]["state"] == "DISPOSITIONED"
-        assert [r["tier"] for r in doc["event"]["revision_history"]] == ["OTHER_SERIOUS"]
-        assert list(doc["harm_fields"]) == [n.value for n in HarmFieldName]
-        assert doc["harm_fields"]["fundamental_rights"]["status"] == "CONFIRMED"
-        assert doc["harm_fields"] == doc["event"]["harm_fields"]
-        assert doc["determination"] == {
-            "tier": "OTHER_SERIOUS",
-            "reviewer_id": str(reviewer.actor_id),
-            "rationale": None,
+        assert list(doc["harm_fields"]) == [
+            "health_safety_harm",
+            "critical_infrastructure_disruption",
+            "fundamental_rights_infringement",
+            "property_environmental_damage",
+        ]
+        assert doc["harm_fields"]["fundamental_rights_infringement"]["status"] == "CONFIRMED"
+        determination = doc["determination"]
+        assert (determination["tier"], determination["reviewer_id"]) == (
+            "OTHER_SERIOUS",
+            str(reviewer.actor_id),
+        )
+        assert determination["rationale"] is None
+        assert determination["deadline_utc"] == "2026-10-13T00:01:00Z"  # B-10: A + 15 days
+        assert doc["timestamps"] == {
+            "detected_at": "2026-09-27T20:01:00Z",
+            "determined_at": "2026-09-28T00:01:00Z",
+            "last_revised_at": None,
+            "assembled_at": "2026-09-28T00:31:00Z",
         }
-        assert doc["detected_at"] == "2026-09-27T20:01:00Z"
-        assert doc["determination_at"] == "2026-09-28T00:01:00Z"
-        assert doc["assembled_at"] == "2026-09-28T00:31:00Z"
-        assert doc["deadline_utc"] == "2026-10-13T00:01:00Z"  # B-10: A + 15 days
         assert stored.report_sha256 == hashlib.sha256(stored.document.encode()).hexdigest()
         assert (stored.disposition_seq, stored.assembled_by) == (1, reviewer.actor_id)
         assert stored.submitted_at is None
@@ -217,18 +230,16 @@ class TestAssembly:
         ]
         view = ledger.calls[1]
         assert view["actor_id"] == other.actor_id
-        sha = json.loads(second)["report_sha256"]
+        sha = hashlib.sha256(second).hexdigest()
         assert view["payload"] == {"event_id": str(disposed), "report_sha256": sha}
 
-    def test_body_is_the_document_plus_hash_and_submission(
-        self, uow, ledger, clock, disposed, reviewer
-    ):
+    def test_body_is_the_stored_document(self, uow, ledger, clock, disposed, reviewer):
+        """Δ2: the bytes stored at assembly, nothing appended (D-30), so the body's hash is
+        report_sha256."""
         stored = report(uow, ledger, clock, disposed, reviewer)
-        body = report_body(stored).decode()
-        assert body.startswith(stored.document[:-1] + ",")
-        parsed = json.loads(body)
-        assert parsed["report_sha256"] == stored.report_sha256
-        assert parsed["submitted_at"] is None
+        body = report_body(stored)
+        assert body == stored.document.encode()
+        assert hashlib.sha256(body).hexdigest() == stored.report_sha256
         ReportOut.model_validate_json(body)
 
     def test_revision_after_assembly_gets_a_new_report(
@@ -243,9 +254,13 @@ class TestAssembly:
         assert second.disposition_seq == 2 and second.report_sha256 != first.report_sha256
         doc = json.loads(second.document)
         assert doc["determination"]["tier"] == "DEATH"
-        assert doc["determination_at"] == "2026-10-01T00:01:00Z"
-        assert doc["deadline_utc"] == "2026-10-08T00:01:00Z"  # stricter: A + 10 days
-        assert [r["tier"] for r in doc["event"]["revision_history"]] == ["OTHER_SERIOUS", "DEATH"]
+        assert doc["determination"]["assigned_at"] == "2026-10-01T00:01:00Z"
+        assert doc["timestamps"]["last_revised_at"] == "2026-10-01T00:01:00Z"
+        assert doc["timestamps"]["determined_at"] == "2026-09-28T00:01:00Z"  # A doesn't move
+        assert doc["determination"]["deadline_utc"] == "2026-10-08T00:01:00Z"  # A + 10 days
+        assert [(r["prior_tier"], r["new_tier"]) for r in doc["determination"]["revisions"]] == [
+            ("OTHER_SERIOUS", "DEATH")
+        ]
         assert set(uow.reports.rows) == {(disposed, 1), (disposed, 2)}
         kept = uow.reports.get(disposed, 1).document
         assert opened(uow, disposed, report_purpose(1), kept) == first.document
@@ -254,7 +269,7 @@ class TestAssembly:
         """B-15: detected_at in the report is the flag time, not the determination's."""
         detected = uow.events.get(disposed).detected_at
         doc = json.loads(report(uow, ledger, clock, disposed, reviewer).document)
-        assert doc["detected_at"] == doc["event"]["detected_at"]
+        assert doc["timestamps"]["detected_at"] == doc["event"]["detected_at"]
         assert detected == T0.replace(minute=1)
 
 
@@ -382,7 +397,10 @@ class TestSubmission:
         submit(uow, ledger, clock, disposed, reviewer, stored)
         again = report(uow, ledger, clock, disposed, reviewer)
         assert again.document == stored.document  # the document itself never changes
-        assert json.loads(report_body(again))["submitted_at"] == "2026-09-28T00:01:00Z"
+        assert report_body(again) == report_body(stored)  # D-30: nothing appended
+        assert again.submitted_at is not None
+        (version,) = list_report_versions(disposed, principal=reviewer, uow=uow)
+        assert version.status == ReportStatus.SUBMITTED  # where the submission shows (Δ4)
 
     def test_a_revision_is_submitted_as_a_follow_up(self, uow, ledger, clock, disposed, reviewer):
         first = report(uow, ledger, clock, disposed, reviewer)
@@ -529,12 +547,13 @@ class TestHttp:
         assert resp.status_code == 200, resp.text
         assert resp.headers["content-type"] == "application/json"
         body = resp.json()
-        for name in ("detected_at", "determination_at", "assembled_at", "deadline_utc"):
-            assert body[name] is not None, name
+        for name in ("detected_at", "determined_at", "assembled_at"):  # AC-13
+            assert body["timestamps"][name] is not None, name
+        assert body["determination"]["deadline_utc"] is not None
         assert body["determination"]["reviewer_id"] == str(reviewer.actor_id)
         assert body["event"]["event_id"] == str(disposed)
-        assert body["submitted_at"] is None
-        assert re_sha(body["report_sha256"])
+        assert "submitted_at" not in body and "report_sha256" not in body  # D-30
+        assert re_sha(resp.headers["x-report-sha256"])
 
     def test_get_is_byte_for_byte_stable(self, http, disposed, clock):
         first = http.get(disposed)
@@ -544,10 +563,10 @@ class TestHttp:
         assert first.content == second.content
 
     def test_hash_is_over_the_stored_document(self, http, uow, disposed):
-        body = http.get(disposed).content.decode()
+        resp = http.get(disposed)
         document = opened(uow, disposed, report_purpose(1), uow.reports.get(disposed, 1).document)
-        assert body.startswith(document[:-1])
-        assert json.loads(body)["report_sha256"] == hashlib.sha256(document.encode()).hexdigest()
+        assert resp.content == document.encode()
+        assert resp.headers["x-report-sha256"] == hashlib.sha256(resp.content).hexdigest()
 
     def test_premature_report_is_409_with_error_body(self, http, ledger, event_id, reviewer):
         resp = http.get(event_id)
@@ -578,9 +597,10 @@ class TestHttp:
         assert http.submit(event_id, json=SUBMISSION).status_code == 404
 
     def test_submission_over_http(self, http, uow, disposed):
-        version = http.get(disposed).json()
+        version = http.get(disposed)
         body = {**SUBMISSION, "report_id": str(uow.reports.get(disposed, 1).id)}
-        body["json_sha256"] = version["report_sha256"]
+        # Δ3: json_sha256 is the SHA-256 of the served body.
+        body["json_sha256"] = hashlib.sha256(version.content).hexdigest()
         resp = http.submit(disposed, json={**body, "authority_reference": "MSA-1"})
         assert resp.status_code == 201, resp.text
         out = resp.json()
@@ -602,7 +622,12 @@ class TestHttp:
         again = http.submit(disposed, json=body)
         assert again.status_code == 409
         assert again.json()["error_code"] == "REPORT_ALREADY_SUBMITTED"
-        assert http.get(disposed).json()["submitted_at"] == out["submitted_at"]
+        assert http.get(disposed).content == version.content  # the document never changes
+        listed = http.client.get(f"/v1/events/{disposed}/reports").json()
+        assert (listed[0]["status"], listed[0]["submitted_at"]) == (
+            "SUBMITTED",
+            out["submitted_at"],
+        )
 
     def test_hash_mismatch_over_http(self, http, uow, disposed):
         http.get(disposed)
@@ -655,7 +680,7 @@ class TestHttp:
         assert resp.headers["etag"] == f'"{row.report_sha256}"'
         assert resp.headers["x-report-id"] == "rpt-" + row.id.hex
         assert resp.headers["x-report-version"] == "1"
-        assert resp.headers["x-report-sha256"] == resp.json()["report_sha256"]
+        assert resp.headers["x-report-sha256"] == hashlib.sha256(resp.content).hexdigest()
         by_id = http.client.get(f"/v1/reports/{resp.headers['x-report-id']}")
         assert by_id.headers["x-report-id"] == "rpt-" + row.id.hex
 

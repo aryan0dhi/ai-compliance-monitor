@@ -189,10 +189,11 @@ def get_report_route(
     ledger: LedgerWriter = Depends(get_ledger),
     clock: Clock = Depends(get_clock),
 ) -> Response:
-    """Submission-ready Article 73 report of the current determination (REQ-12, B-12).
+    """Submission-ready Article 73 report of the current determination (REQ-12, B-12), in the
+    `pod-h-report-1` schema (contract delta Δ1, D-30).
 
     Assembled on the first call after a serious-tier disposition; every later call returns the
-    same bytes until a revision or the submission mark (D-25).
+    same bytes until a revision (D-25); recording a submission doesn't change them (D-30).
     """
     parsed_id = to_internal_id(event_id)
     try:
@@ -200,7 +201,7 @@ def get_report_route(
         if parsed_id is None:
             raise EventNotFound(event_id)
         if report_format == "pdf":
-            # The PDF layout comes from the delta's report.schema.json, which we don't have.
+            # Not built yet: a faithful PDF of the report needs an embedded Unicode font (D-30).
             raise HTTPException(
                 status.HTTP_501_NOT_IMPLEMENTED,
                 "PDF reports are not implemented yet (contract delta Δ2); use format=json",

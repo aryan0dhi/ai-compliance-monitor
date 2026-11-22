@@ -155,9 +155,12 @@ deployment provides.
 ### Phase 5
 
 - **B-12 Report (REQ-12, AC-13).** Once a serious tier is assigned, `GET /v1/events/{id}/report`
-  returns the event, the four harm fields, the determination, and `detected_at`,
-  `determination_at` and `assembled_at`, all non-null. Repeated calls return the same document.
-  Before a serious-tier disposition the call is `409` (REQ-08a).
+  returns the event, the four harm fields, the determination, and the detection, determination
+  and assembly times, all non-null. Repeated calls return the same document. Before a
+  serious-tier disposition the call is `409` (REQ-08a). Since D-30 the document follows the
+  contract delta's [report.schema.json](report.schema.json) (`pod-h-report-1`). The times are
+  `timestamps.detected_at`, `timestamps.determined_at` and `timestamps.assembled_at`, and the
+  harm fields use the schema's names (`health_safety_harm`, …).
 
 ### Repeatable testing
 

@@ -22,6 +22,7 @@ from app.modules.review.models import HarmFieldName, Report, ReportSubmission
 from app.modules.review.report import get_report
 from tests.conftest import T0
 from tests.fakes import FixedClock, opened, user_principal
+from tests.test_report_schema import violations
 
 ALL_NA = {name.value: {"status": "NOT_APPLICABLE"} for name in HarmFieldName}
 EX1_FIELDS = {
@@ -102,20 +103,34 @@ def test_model5_ex1_report_after_revision(stack, clock):
     first = stack.report(event_id)
     assert first.status_code == 200, first.text
     body = first.json()
-    assert body["detected_at"] == "2026-09-27T20:01:00Z"
-    assert body["determination_at"] == "2026-10-01T00:01:00Z"
-    assert body["assembled_at"] == "2026-10-08T00:01:00Z"
-    assert body["deadline_utc"] == "2026-10-08T00:01:00Z"
-    assert body["determination"] == {
-        "tier": "DEATH",
-        "reviewer_id": str(stack.keys["reviewer2"].user_id),
-        "rationale": None,
+    assert violations(body) == []  # Δ1 report.schema.json (D-30)
+    assert body["timestamps"] == {
+        "detected_at": "2026-09-27T20:01:00Z",
+        "determined_at": "2026-09-28T00:01:00Z",  # A, the first serious determination
+        "last_revised_at": "2026-10-01T00:01:00Z",
+        "assembled_at": "2026-10-08T00:01:00Z",
     }
-    assert body["harm_fields"]["fundamental_rights"]["status"] == "CONFIRMED"
-    assert body["harm_fields"]["fundamental_rights"]["prefill_evidence"].startswith("accuracy")
-    assert [r["tier"] for r in body["event"]["revision_history"]] == ["OTHER_SERIOUS", "DEATH"]
+    determination = body["determination"]
+    assert determination["deadline_utc"] == "2026-10-08T00:01:00Z"  # A + 10 days
+    assert (determination["tier"], determination["reviewer_id"], determination["rationale"]) == (
+        "DEATH",
+        str(stack.keys["reviewer2"].user_id),
+        None,
+    )
+    assert [(r["prior_tier"], r["new_tier"]) for r in determination["revisions"]] == [
+        ("OTHER_SERIOUS", "DEATH")
+    ]
+    assert body["risk_indicator"] == {"detection_to_assignment_seconds": 4 * 3600}
+    assert body["harm_fields"]["fundamental_rights_infringement"]["status"] == "CONFIRMED"
     assert body["event"]["observed_value"] == 0.61
-    assert body["submitted_at"] is None
+    assert [s["value"] for s in body["event"]["evidence_bundle"]["samples"]] == [0.61]
+    # The anchor is a real ledger entry from before the report was assembled.
+    anchor = body["ledger_anchor"]
+    with stack.make_uow() as uow:
+        entries = uow.ledger.page(after_seq=0, limit=1000)
+    (anchored,) = [e for e in entries if e.seq == anchor["seq"]]
+    assert anchored.entry_hash == anchor["hash"]
+    assert all(e.entry_type != "REPORT_ASSEMBLED" for e in entries if e.seq <= anchor["seq"])
 
     # B-12: byte-for-byte the same on later calls, by another reviewer, a day later.
     clock.advance(days=1)
@@ -131,7 +146,7 @@ def test_model5_ex1_report_after_revision(stack, clock):
         # Stored sealed (REQ-16); the hash is over the document as assembled and served.
         document = opened(uow, event_id, report_purpose(2), sealed)
         assert sha == hashlib.sha256(document.encode()).hexdigest()
-        assert first.content.decode().startswith(document[:-1] + ",")
+        assert first.content.decode() == document  # served as stored (D-30)
 
     actions = [e["action"] for e in stack.audit(event_id)]
     assert actions[-2:] == ["REPORT_ASSEMBLED", "VIEW"]
@@ -173,9 +188,10 @@ def test_submission(stack, clock):
     out = resp.json()
     assert (out["submitted_at"], out["submission_kind"]) == ("2026-09-27T22:01:00Z", "INITIAL")
     assert out["authority_reference"] == "MSA-2026-0042"
-    # Only the submission time differs from the assembled report.
-    before, after = assembled.json(), stack.report(event_id).json()
-    assert {k for k in after if after[k] != before[k]} == {"submitted_at"}
+    # The report itself doesn't change (D-30); the submission shows in the version list.
+    assert stack.report(event_id).content == assembled.content
+    (listed,) = stack.call("GET", f"/v1/events/{event_id}/reports", "viewer").json()
+    assert (listed["status"], listed["submitted_at"]) == ("SUBMITTED", "2026-09-27T22:01:00Z")
     again = stack.submit(event_id, json=body)
     assert again.status_code == 409 and again.json()["error_code"] == "REPORT_ALREADY_SUBMITTED"
     by_id = stack.call("GET", f"/v1/reports/{body['report_id']}", "reviewer")

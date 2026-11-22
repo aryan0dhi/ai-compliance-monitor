@@ -197,9 +197,7 @@ def test_0012_seals_existing_rows_and_downgrade_opens_them(scratch_db, monkeypat
     # The sealed rows read exactly as before through the API.
     detail = call("GET", f"/v1/events/{event_id}", "reviewer").json()
     assert detail["revision_history"][0]["rationale"] == RATIONALE
-    assert call("GET", f"/v1/events/{event_id}/report", "reviewer").content.startswith(
-        report.content[: report.content.rindex(b',"report_sha256"')]
-    )
+    assert call("GET", f"/v1/events/{event_id}/report", "reviewer").content == report.content
 
 
 def test_delta6_erasure_on_request_on_postgres(stack, clock):  # noqa: F811
