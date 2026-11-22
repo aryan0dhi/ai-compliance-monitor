@@ -7,14 +7,16 @@ bytes before them never change.
 """
 
 import hashlib
+from dataclasses import dataclass
 from datetime import datetime
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
 from app.core.types import IdOut, UtcDatetime
 from app.modules.events.schemas import EventDetail, HarmFieldOut
 from app.modules.events.service import EventRecord
-from app.modules.review.models import DispositionTier, Report
+from app.modules.review.models import DispositionTier
 
 NOTE_MAX_LENGTH = 2000
 
@@ -50,6 +52,22 @@ class ReportOut(ReportDocument, ReportTail):
     """The response schema (pod Report). Routes send `report_body` bytes, not this model."""
 
 
+@dataclass(frozen=True)
+class RevealedReport:
+    """A stored report with its sealed text opened (REQ-16): what the routes serve. The report
+    row itself holds the document and note sealed with the event's key."""
+
+    event_id: UUID
+    disposition_seq: int
+    document: str
+    report_sha256: str
+    assembled_at: datetime
+    assembled_by: UUID
+    submitted_at: datetime | None
+    submitted_by: UUID | None
+    submission_note: str | None
+
+
 class ReportSubmissionIn(BaseModel):
     note: str | None = Field(None, max_length=NOTE_MAX_LENGTH)
 
@@ -68,7 +86,7 @@ def assemble_document(record: EventRecord, *, assembled_at: datetime) -> str:
         determination=DeterminationOut(
             tier=DispositionTier(current.tier),
             reviewer_id=current.reviewer_id,
-            rationale=current.rationale,
+            rationale=record.rationales.get(current.seq),
         ),
         detected_at=record.event.detected_at,
         determination_at=current.recorded_at,
@@ -81,7 +99,7 @@ def sha256_hex(document: str) -> str:
     return hashlib.sha256(document.encode("utf-8")).hexdigest()
 
 
-def report_body(report: Report) -> bytes:
+def report_body(report: RevealedReport) -> bytes:
     """The stored document with report_sha256 and submitted_at appended, as response bytes."""
     tail = ReportTail(report_sha256=report.report_sha256, submitted_at=report.submitted_at)
     document = report.document

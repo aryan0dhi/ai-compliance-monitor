@@ -80,13 +80,14 @@ class RevisionOut(BaseModel):
     deadline_utc: UtcDatetime | None = None
 
     @classmethod
-    def from_disposition(cls, d: Disposition) -> "RevisionOut":
+    def from_disposition(cls, d: Disposition, rationale: str | None) -> "RevisionOut":
+        """`rationale` is the plaintext; the stored one is sealed (REQ-16)."""
         return cls(
             tier=DispositionTier(d.tier),
             previous_tier=DispositionTier(d.previous_tier) if d.previous_tier else None,
             reviewer_id=d.reviewer_id,
             recorded_at=d.recorded_at,
-            rationale=d.rationale,
+            rationale=rationale,
             deadline_utc=d.deadline_utc,
         )
 
@@ -122,15 +123,22 @@ class EventDetail(BaseModel):
     gap_started_at: UtcDatetime | None = None
     gap_ended_at: UtcDatetime | None = None
     gap_duration_seconds: int | None = None
+    # REQ-16 (D-28, Proposed): when the event's personal data was erased at the end of its
+    # retention period. From then on every rationale reads as null. Null while it is readable.
+    personal_data_erased_at: UtcDatetime | None = None
 
     @classmethod
     def from_record(cls, record: EventRecord) -> "EventDetail":
         detail = cls.from_event(record.event)
         if record.harm_fields:
             detail.harm_fields = {f.name: HarmFieldOut.from_field(f) for f in record.harm_fields}
-        detail.revision_history = [RevisionOut.from_disposition(d) for d in record.dispositions]
+        detail.revision_history = [
+            RevisionOut.from_disposition(d, record.rationales.get(d.seq))
+            for d in record.dispositions
+        ]
         if record.dispositions:
             detail.deadline_utc = record.dispositions[-1].deadline_utc
+        detail.personal_data_erased_at = record.personal_data_erased_at
         return detail
 
     @classmethod

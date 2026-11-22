@@ -12,6 +12,8 @@ dependencies = [
     "pydantic-settings>=2.4,<3",
     # Webhook delivery (REQ-04).
     "httpx>=0.27,<1",
+    # Per-event record keys, AES-256-GCM (REQ-16, app/modules/records).
+    "cryptography>=44",
 ]
 
 [project.optional-dependencies]

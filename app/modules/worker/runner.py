@@ -23,6 +23,7 @@ from app.modules.notifications.delivery import WebhookSender, sender_from_settin
 from app.modules.notifications.dispatcher import DispatchResult, dispatch_due
 from app.modules.notifications.interface import Notifier, get_notifier
 from app.modules.notifications.outbox import notify_max_delay
+from app.modules.records.service import ErasureResult, erase_expired
 from app.modules.review.reminders import ReminderSweepResult, sweep_reminders
 from app.modules.worker.models import WorkerHeartbeat
 
@@ -38,6 +39,7 @@ OVERDUE_LOOKBACK = timedelta(days=1)
 class TickResult:
     gaps: GapSweepResult | None = None
     reminders: ReminderSweepResult | None = None
+    erasure: ErasureResult | None = None
     ledger_check: LedgerCheckResult | None = None
     dispatch: DispatchResult | None = None
     newly_overdue: int = 0
@@ -86,6 +88,12 @@ class Worker:
         except Exception:
             logger.exception("reminder sweep failed")
             result.errors.append("reminders")
+        try:
+            # REQ-16: destroy the keys of events whose retention period has ended.
+            result.erasure = erase_expired(self._uow_factory, ledger=self._ledger, clock=clock)
+        except Exception:
+            logger.exception("personal-data erasure failed")
+            result.errors.append("erasure")
         try:
             # Before dispatch, so an alert goes out in the same pass (#71).
             result.ledger_check = run_ledger_check(

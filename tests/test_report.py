@@ -24,6 +24,7 @@ from app.modules.ledger.interface import LedgerEntryType, get_ledger
 from app.modules.metrics.models import MetricType
 from app.modules.metrics.service import MetricSubmission, ingest_metric
 from app.modules.notifications.interface import get_notifier
+from app.modules.records.service import note_purpose, report_purpose
 from app.modules.review.disposition import (
     DispositionRequest,
     FieldConfirmation,
@@ -38,7 +39,7 @@ from app.modules.review.report import (
 )
 from app.modules.review.report_schemas import ReportOut, report_body
 from tests.conftest import T0
-from tests.fakes import RecordingNotifier, system_principal, user_principal
+from tests.fakes import RecordingNotifier, opened, system_principal, user_principal
 
 SYSTEM = UUID("550e8400-e29b-41d4-a716-446655440000")
 CONFIRMED, NA = HarmFieldStatus.CONFIRMED, HarmFieldStatus.NOT_APPLICABLE
@@ -156,7 +157,14 @@ class TestAssembly:
         assert stored.report_sha256 == hashlib.sha256(stored.document.encode()).hexdigest()
         assert (stored.disposition_seq, stored.assembled_by) == (1, reviewer.actor_id)
         assert stored.submitted_at is None
-        assert uow.reports.rows == {(disposed, 1): stored}
+        # The row holds the same document sealed with the event's key (REQ-16).
+        (row,) = uow.reports.rows.values()
+        assert (row.event_id, row.disposition_seq, row.report_sha256) == (
+            disposed,
+            1,
+            stored.report_sha256,
+        )
+        assert opened(uow, disposed, report_purpose(1), row.document) == stored.document
 
     def test_assembly_writes_one_ledger_entry(self, uow, ledger, clock, disposed, reviewer):
         stored = report(uow, ledger, clock, disposed, reviewer)
@@ -221,7 +229,8 @@ class TestAssembly:
         assert doc["deadline_utc"] == "2026-10-08T00:01:00Z"  # stricter: A + 10 days
         assert [r["tier"] for r in doc["event"]["revision_history"]] == ["OTHER_SERIOUS", "DEATH"]
         assert set(uow.reports.rows) == {(disposed, 1), (disposed, 2)}
-        assert uow.reports.get(disposed, 1).document == first.document
+        kept = uow.reports.get(disposed, 1).document
+        assert opened(uow, disposed, report_purpose(1), kept) == first.document
 
     def test_detected_at_never_changes(self, uow, ledger, clock, disposed, reviewer):
         """B-15: detected_at in the report is the flag time, not the determination's."""
@@ -308,11 +317,14 @@ class TestSubmission:
         clock.advance(hours=2)
         submitted = submit(uow, ledger, clock, disposed, reviewer, note="sent via the portal")
 
-        assert submitted is stored
+        assert (submitted.event_id, submitted.disposition_seq) == (stored.event_id, 1)
         assert submitted.submitted_at == T0.replace(minute=1) + timedelta(hours=6)
         assert submitted.submitted_by == reviewer.actor_id
         assert submitted.submission_note == "sent via the portal"
         assert submitted.document == document  # the document itself never changes
+        # Note sealed in the row and in the ledger (REQ-16); same token in both.
+        sealed_note = uow.reports.get(disposed, 1).submission_note
+        assert opened(uow, disposed, note_purpose(1), sealed_note) == "sent via the portal"
         assert ledger.calls[-1] == {
             "session": None,
             "entry_type": LedgerEntryType.REPORT_SUBMITTED,
@@ -322,7 +334,7 @@ class TestSubmission:
                 "disposition_seq": 1,
                 "report_sha256": stored.report_sha256,
                 "submitted_at": "2026-09-28T02:01:00+00:00",
-                "note": "sent via the portal",
+                "note": sealed_note,
             },
             "event_id": disposed,
         }
@@ -421,12 +433,9 @@ class TestHttp:
 
     def test_hash_is_over_the_stored_document(self, http, uow, disposed):
         body = http.get(disposed).content.decode()
-        stored = uow.reports.get(disposed, 1)
-        assert body.startswith(stored.document[:-1])
-        assert (
-            json.loads(body)["report_sha256"]
-            == hashlib.sha256(stored.document.encode()).hexdigest()
-        )
+        document = opened(uow, disposed, report_purpose(1), uow.reports.get(disposed, 1).document)
+        assert body.startswith(document[:-1])
+        assert json.loads(body)["report_sha256"] == hashlib.sha256(document.encode()).hexdigest()
 
     def test_premature_report_is_409_with_error_body(self, http, ledger, event_id, reviewer):
         resp = http.get(event_id)

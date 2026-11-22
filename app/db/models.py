@@ -10,6 +10,7 @@ from app.modules.events import models as events_models  # noqa: F401
 from app.modules.ledger import models as ledger_models  # noqa: F401
 from app.modules.metrics import models as metrics_models  # noqa: F401
 from app.modules.notifications import models as notifications_models  # noqa: F401
+from app.modules.records import models as records_models  # noqa: F401
 from app.modules.review import models as review_models  # noqa: F401
 from app.modules.systems import models as systems_models  # noqa: F401
 from app.modules.testing import models as testing_models  # noqa: F401

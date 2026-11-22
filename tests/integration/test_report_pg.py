@@ -17,10 +17,11 @@ from app.modules.auth.interface import Role
 from app.modules.auth.service import create_user
 from app.modules.ledger.models import LedgerEntry
 from app.modules.ledger.service import verify_ledger
+from app.modules.records.service import note_purpose, report_purpose
 from app.modules.review.models import HarmFieldName, Report
 from app.modules.review.report import get_report
 from tests.conftest import T0
-from tests.fakes import FixedClock, user_principal
+from tests.fakes import FixedClock, opened, user_principal
 
 ALL_NA = {name.value: {"status": "NOT_APPLICABLE"} for name in HarmFieldName}
 EX1_FIELDS = {
@@ -125,8 +126,12 @@ def test_model5_ex1_report_after_revision(stack, clock):
     with stack.sessionmaker() as s:
         stored = s.scalars(select(Report)).one()
         assert stored.disposition_seq == 2
-        assert stored.report_sha256 == hashlib.sha256(stored.document.encode()).hexdigest()
-        assert first.content.decode().startswith(stored.document[:-1] + ",")
+        sealed, sha = stored.document, stored.report_sha256
+    with stack.make_uow() as uow:
+        # Stored sealed (REQ-16); the hash is over the document as assembled and served.
+        document = opened(uow, event_id, report_purpose(2), sealed)
+        assert sha == hashlib.sha256(document.encode()).hexdigest()
+        assert first.content.decode().startswith(document[:-1] + ",")
 
     actions = [e["action"] for e in stack.audit(event_id)]
     assert actions[-2:] == ["REPORT_ASSEMBLED", "VIEW"]
@@ -152,12 +157,16 @@ def test_submission(stack, clock):
     with stack.sessionmaker() as s:
         stored = s.scalars(select(Report)).one()
         assert stored.submitted_by == stack.keys["reviewer"].user_id
-        assert stored.submission_note == "sent via the authority's portal"
         entry = s.scalars(
             select(LedgerEntry).where(LedgerEntry.entry_type == "REPORT_SUBMITTED")
         ).one()
-        assert entry.payload["note"] == "sent via the authority's portal"
+        # Sealed in the row and in the ledger, with the same token (REQ-16).
+        assert entry.payload["note"] == stored.submission_note
         assert entry.payload["report_sha256"] == stored.report_sha256
+        sealed_note = stored.submission_note
+    with stack.make_uow() as uow:
+        note = opened(uow, event_id, note_purpose(1), sealed_note)
+        assert note == "sent via the authority's portal"
     assert verify_ledger(principal=user_principal(Role.VIEWER), uow=stack.make_uow()).valid
 
 

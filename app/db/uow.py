@@ -28,6 +28,7 @@ from app.modules.notifications.repository import (
     SqlWebhookRepository,
     WebhookRepository,
 )
+from app.modules.records.repository import RecordKeyRepository, SqlRecordKeyRepository
 from app.modules.review.repository import (
     DispositionRepository,
     HarmFieldRepository,
@@ -58,6 +59,8 @@ class UnitOfWork(Protocol):
     def dispositions(self) -> DispositionRepository: ...
     @property
     def reports(self) -> ReportRepository: ...
+    @property
+    def record_keys(self) -> RecordKeyRepository: ...
     @property
     def auth(self) -> AuthRepository: ...
     # Read side only; entries are written through the LedgerWriter.
@@ -96,6 +99,7 @@ class SqlAlchemyUnitOfWork:
         self.harm_fields: HarmFieldRepository = SqlHarmFieldRepository(session)
         self.dispositions: DispositionRepository = SqlDispositionRepository(session)
         self.reports: ReportRepository = SqlReportRepository(session)
+        self.record_keys: RecordKeyRepository = SqlRecordKeyRepository(session)
         self.auth: AuthRepository = SqlAuthRepository(session)
         self.ledger: LedgerRepository = SqlLedgerRepository(session)
         self.ledger_checks: LedgerCheckRepository = SqlLedgerCheckRepository(session)

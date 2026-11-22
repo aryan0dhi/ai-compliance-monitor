@@ -74,7 +74,7 @@ def _create_index_statements(sql: str) -> set[str]:
 
 def test_single_head():
     heads = ScriptDirectory.from_config(_config()).get_heads()
-    assert heads == ["0011"], heads
+    assert heads == ["0012"], heads
 
 
 @pytest.fixture(scope="module")
@@ -116,6 +116,15 @@ def test_downgrade_drops_everything():
     sql = _offline_sql("downgrade", "0002:0001")
     for table in ["event", "threshold_version", "metric_sample", "monitored_system"]:
         assert f"DROP TABLE {table};" in sql
+
+
+def test_0012_adds_record_key_and_the_erasure_entry_type():
+    up = _offline_sql("upgrade", "0011:0012")
+    assert "CREATE TABLE record_key" in up
+    assert "'REFUSED', 'PERSONAL_DATA_ERASED')" in up
+    down = _offline_sql("downgrade", "0012:0011")
+    assert "DROP TABLE record_key;" in down
+    assert "'PERSONAL_DATA_ERASED'" not in down
 
 
 def test_0011_adds_ledger_check_and_ledger_alerts():

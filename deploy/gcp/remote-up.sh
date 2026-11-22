@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Runs ON the VM (deploy.sh copies it there): unpack the release and (re)start the stack.
-# Keeps deploy/gcp/.env (database password, site address) across releases.
+# Keeps deploy/gcp/.env (database password, site address, record-key master key) across releases.
 set -euo pipefail
 : "${SITE_ADDRESS:?}"
 
@@ -29,6 +29,12 @@ WEBHOOK_ALLOW_PRIVATE_NETWORKS=false
 POSTGRES_PASSWORD=$(openssl rand -hex 24)
 SITE_ADDRESS=${SITE_ADDRESS}
 EOF
+fi
+# REQ-16: the master key that wraps each event's record key. Created once, before the API first
+# runs migration 0012 (which seals existing personal data with it), and kept across releases
+# like the database password. Losing it makes all sealed personal data unreadable.
+if ! sudo grep -q '^RECORD_KEY_MASTER_KEY=' "$ENV_FILE"; then
+    echo "RECORD_KEY_MASTER_KEY=$(openssl rand -base64 32)" | sudo tee -a "$ENV_FILE" >/dev/null
 fi
 sudo chmod 600 "$ENV_FILE"
 
