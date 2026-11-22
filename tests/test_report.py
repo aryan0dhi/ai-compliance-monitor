@@ -585,7 +585,9 @@ class TestHttp:
         assert resp.status_code == 201, resp.text
         out = resp.json()
         assert out["submission_kind"] == "INITIAL" and out["report_type"] == "Initial"
-        assert out["event_id"] == str(disposed) and out["report_id"] == body["report_id"]
+        # Sent in the UUID form served before D-30; the response uses the rpt- form.
+        assert out["event_id"] == str(disposed)
+        assert out["report_id"] == "rpt-" + uow.reports.get(disposed, 1).id.hex
         assert set(out) == {
             "submission_id",
             "report_id",
@@ -651,11 +653,11 @@ class TestHttp:
         resp = http.get(disposed)
         row = uow.reports.get(disposed, 1)
         assert resp.headers["etag"] == f'"{row.report_sha256}"'
-        assert resp.headers["x-report-id"] == str(row.id)
+        assert resp.headers["x-report-id"] == "rpt-" + row.id.hex
         assert resp.headers["x-report-version"] == "1"
         assert resp.headers["x-report-sha256"] == resp.json()["report_sha256"]
-        by_id = http.client.get(f"/v1/reports/{row.id}")
-        assert by_id.headers["x-report-id"] == str(row.id)
+        by_id = http.client.get(f"/v1/reports/{resp.headers['x-report-id']}")
+        assert by_id.headers["x-report-id"] == "rpt-" + row.id.hex
 
     def test_format_parameter(self, http, disposed):
         default = http.get(disposed)
