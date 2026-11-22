@@ -28,6 +28,13 @@ class MetricRepository(Protocol):
         """Earliest received_at later than `after`: when data resumed after a gap (REQ-02)."""
         ...
 
+    def in_window(
+        self, system_id: UUID, metric_name: str, start: datetime, end: datetime
+    ) -> list[MetricSample]:
+        """The system's samples of one metric with start <= sampled_at <= end, oldest first
+        (a report's evidence bundle, Model 2)."""
+        ...
+
 
 def build_insert_if_absent(sample: MetricSample) -> Insert:
     """INSERT ... ON CONFLICT DO NOTHING RETURNING: race-safe idempotent insert on the PK."""
@@ -62,3 +69,18 @@ class SqlMetricRepository:
             MetricSample.system_id == system_id, MetricSample.received_at > after
         )
         return self._session.scalar(stmt)
+
+    def in_window(
+        self, system_id: UUID, metric_name: str, start: datetime, end: datetime
+    ) -> list[MetricSample]:
+        stmt = (
+            select(MetricSample)
+            .where(
+                MetricSample.system_id == system_id,
+                MetricSample.metric_name == metric_name,
+                MetricSample.sampled_at >= start,
+                MetricSample.sampled_at <= end,
+            )
+            .order_by(MetricSample.sampled_at)
+        )
+        return list(self._session.scalars(stmt))

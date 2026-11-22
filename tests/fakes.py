@@ -90,6 +90,20 @@ class FakeMetricRepository:
         ]
         return min(times, default=None)
 
+    def in_window(
+        self, system_id: UUID, metric_name: str, start: datetime, end: datetime
+    ) -> list[MetricSample]:
+        return sorted(
+            (
+                s
+                for s in self.rows.values()
+                if s.system_id == system_id
+                and s.metric_name == metric_name
+                and start <= s.sampled_at <= end
+            ),
+            key=lambda s: s.sampled_at,
+        )
+
 
 class FakeThresholdRepository:
     def __init__(self) -> None:
