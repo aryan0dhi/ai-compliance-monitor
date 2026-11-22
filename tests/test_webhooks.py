@@ -17,6 +17,7 @@ from app.core.config import AppEnv, Settings
 from app.db.uow import get_uow
 from app.main import create_app
 from app.modules.auth.interface import Role, get_principal
+from app.modules.ledger.interface import LedgerEntryType, get_ledger
 from app.modules.notifications.delivery import (
     SIGNATURE_HEADER,
     HttpWebhookSender,
@@ -292,7 +293,7 @@ def test_real_http_delivery_to_a_local_receiver():
 
 class TestRegisterRoute:
     @pytest.fixture
-    def api(self, uow, clock):
+    def api(self, uow, clock, ledger):
         sender = RecordingSender()
         state = {"principal": user_principal(Role.ADMIN)}
         app = create_app()
@@ -302,6 +303,7 @@ class TestRegisterRoute:
                 get_uow: lambda: uow,
                 get_clock: lambda: clock,
                 get_webhook_sender: lambda: sender,
+                get_ledger: lambda: ledger,
             }
         )
         return TestClient(app), sender, state
@@ -324,12 +326,26 @@ class TestRegisterRoute:
         }
         assert ping["secret"] == hook.secret
 
-    def test_failed_ping_is_422_and_stores_nothing(self, api, uow):
+    def test_registration_is_audited_with_the_url_hash_only(self, api, ledger):
+        """Contract delta \u03948 (D-29): one WEBHOOK_REGISTERED entry, url_sha256 not url."""
+        client, _, state = api
+        body = client.post("/v1/webhooks", json=self.BODY).json()
+        (entry,) = ledger.calls
+        assert entry["entry_type"] == LedgerEntryType.WEBHOOK_REGISTERED
+        assert entry["actor_id"] == state["principal"].actor_id and entry["event_id"] is None
+        assert entry["payload"] == {
+            "webhook_id": body["webhook_id"],
+            "url_sha256": hashlib.sha256(self.BODY["url"].encode("utf-8")).hexdigest(),
+            "event_types": ["flag_notification"],
+        }
+        assert self.BODY["url"] not in json.dumps(entry["payload"])
+
+    def test_failed_ping_is_422_and_stores_nothing(self, api, uow, ledger):
         client, sender, _ = api
         sender.respond = lambda url: SendResult(ok=False, status_code=404, error="HTTP 404")
         resp = client.post("/v1/webhooks", json=self.BODY)
         assert resp.status_code == 422 and "HTTP 404" in resp.json()["detail"]
-        assert uow.webhooks.rows == {}
+        assert uow.webhooks.rows == {} and ledger.calls == []
 
     @pytest.mark.parametrize("role", [Role.VIEWER, Role.REVIEWER])
     def test_non_admin_is_403(self, api, uow, role):

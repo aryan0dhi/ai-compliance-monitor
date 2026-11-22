@@ -39,6 +39,9 @@ class LedgerEntryType(StrEnum):
     # \u03946; D-29). Replaces PERSONAL_DATA_ERASED, which stays valid for entries written
     # before migration 0014.
     RECORD_ERASED = "RECORD_ERASED"
+    # An admin registered a webhook (POST /v1/webhooks). The payload has `url_sha256`, never the
+    # URL (contract delta \u03948; D-29). Not about an event, so event_id is null.
+    WEBHOOK_REGISTERED = "WEBHOOK_REGISTERED"
 
 
 class LedgerEntry(Base):

@@ -17,6 +17,7 @@ to [spec-decisions.md](spec-decisions.md).
 | `0012` | `record_key`; `PERSONAL_DATA_ERASED` ledger entry type; seals existing personal text | REQ-16, REQ-05 (D-28) |
 | `0013` | `event_retention_guard` trigger on `event` | REQ-05, INV-10 (#69) |
 | `0014` | `RECORD_ERASED` ledger entry type | REQ-16, contract delta A4/\u03946 (D-29) |
+| `0015` | `WEBHOOK_REGISTERED` ledger entry type | REQ-14, contract delta \u03948 (D-29) |
 
 ## Diagram
 

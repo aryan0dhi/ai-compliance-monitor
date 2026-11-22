@@ -683,6 +683,13 @@ the event (`404`), and before the monitoring-gap check (the delta's `EVENT_NOT_R
   `PERSONAL_DATA_ERASED` stays valid for older entries.
 - Refused erasure calls are not ledgered (D-26 covers disposition and report calls only).
 
+**\u03948 (`WEBHOOK_REGISTERED`), implemented.** `POST /v1/webhooks` now appends one
+`WEBHOOK_REGISTERED` ledger entry (actor: the admin; no event) with payload
+`{webhook_id, url_sha256, event_types}`, where `url_sha256` is the lowercase hex SHA-256 of the
+UTF-8 URL. The URL itself never enters the ledger. The delta changes `url` to `url_sha256` in an
+entry our ledger didn't have before, so for us the whole entry is new; the other payload fields
+are our choice (migration 0015).
+
 **Open input "viewer writes", not implemented.** The delta notes that viewers may call
 `POST /v1/webhooks` and the test endpoints. Here they stay admin-only (D-13): Phase 2 §5.1 says
 viewers "can read events/audit/ledger but not write", and opening them would let a viewer send
