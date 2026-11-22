@@ -777,3 +777,8 @@ trigger irreversible erasure (REQ-16). Changing it needs instructor sign-off.
 **Source.** The other team's `report.schema.json` (`pod-h-report-1`, JSON Schema 2020-12), received
 after D-29. Our implementation choices, and what it still lacks, are recorded here as they land.
 Until then `GET /v1/events/{event_id}/report` serves the D-25 document.
+
+- The schema is copied unchanged to [`pod-interface/report.schema.json`](pod-interface/report.schema.json).
+  `tests/test_report_schema.py` validates served reports against it, plus the ordering
+  `detected_at < determined_at < assembled_at` that JSON Schema can't express. Those tests are
+  strict expected failures until the report follows the schema.
