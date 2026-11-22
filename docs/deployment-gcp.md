@@ -33,6 +33,10 @@ rebuilds the image and restarts the stack. Migrations run when the API starts. D
 PostgreSQL volume survives redeploys. The script prints the URL, for example
 `https://34-123-45-67.sslip.io`.
 
+To see which commit is running, without logging in to the VM: `curl https://<SITE_ADDRESS>/v1/meta`.
+Its `build` field is the full SHA of the HEAD that `deploy.sh` uploaded (`unknown` for an image
+built without the `GIT_SHA` build arg). Tester reports record it as `target_build`.
+
 ## Issue keys for a team
 
 ```bash
