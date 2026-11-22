@@ -689,7 +689,7 @@ class TestHttp:
         as_json = http.client.get(f"/v1/events/{disposed}/report", params={"format": "json"})
         assert as_json.status_code == 200 and as_json.content == default.content
         pdf = http.client.get(f"/v1/events/{disposed}/report", params={"format": "pdf"})
-        assert pdf.status_code == 501 and "PDF" in pdf.json()["detail"]
+        assert pdf.status_code == 200 and pdf.headers["content-type"] == "application/pdf"
         bad = http.client.get(f"/v1/events/{disposed}/report", params={"format": "xml"})
         assert bad.status_code == 400 and bad.json()["error_code"] == "MALFORMED_QUERY"
 
