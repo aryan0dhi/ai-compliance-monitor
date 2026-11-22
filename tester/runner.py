@@ -26,6 +26,7 @@ class PlannedTest:
     test_id: str
     endpoints: list[str] = field(default_factory=list)
     acs: list[str] = field(default_factory=list)
+    model: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -33,6 +34,15 @@ class SuiteRun:
     planned: list[PlannedTest]
     results: list[dict[str, Any]]  # one per planned test, in order
     aborted: str | None = None  # why the run stopped early, or None
+    # What a test reported it evaluated, by test_id, where it differs from its static tags.
+    evaluated: dict[str, dict[str, list[str]]] = field(default_factory=dict)
+
+    def tags(self, test: PlannedTest, key: str) -> list[str]:
+        """What `test` evaluated under `key` ("endpoints", "acs" or "model")."""
+        reported = self.evaluated.get(test.test_id)
+        if reported is not None and key in reported:
+            return list(reported[key])
+        return list(getattr(test, key))
 
 
 def suite_env(target_url: str, overrides: dict[str, str], results_file: Path, tmp: Path) -> dict:
@@ -103,7 +113,7 @@ def _read(path: Path) -> list[dict[str, Any]]:
 
 def assemble(records: list[dict[str, Any]], aborted: str | None) -> SuiteRun:
     planned = [
-        PlannedTest(r["test_id"], r.get("endpoints", []), r.get("acs", []))
+        PlannedTest(r["test_id"], r.get("endpoints", []), r.get("acs", []), r.get("model", []))
         for r in records
         if r.get("kind") == "planned"
     ]
@@ -117,7 +127,7 @@ def assemble(records: list[dict[str, Any]], aborted: str | None) -> SuiteRun:
     for test in planned:
         result = finished.get(test.test_id)
         if result is not None:
-            results.append({k: v for k, v in result.items() if k != "kind"})
+            results.append({k: v for k, v in result.items() if k not in ("kind", "covers")})
         elif test.test_id in started:
             results.append(
                 {
@@ -131,4 +141,7 @@ def assemble(records: list[dict[str, Any]], aborted: str | None) -> SuiteRun:
             results.append(
                 {"test_id": test.test_id, "outcome": "skip", "message": "not run: the run aborted"}
             )
-    return SuiteRun(planned=planned, results=results, aborted=aborted)
+    evaluated = {
+        test_id: r["covers"] for test_id, r in finished.items() if isinstance(r.get("covers"), dict)
+    }
+    return SuiteRun(planned=planned, results=results, aborted=aborted, evaluated=evaluated)

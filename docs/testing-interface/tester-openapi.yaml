@@ -163,3 +163,9 @@ components:
             code: { $ref: "#/components/schemas/CoverageEntry" }
             component: { $ref: "#/components/schemas/CoverageEntry" }
             system: { $ref: "#/components/schemas/CoverageEntry" }
+            model:
+              $ref: "#/components/schemas/CoverageEntry"
+              description: |
+                Phase 5: design requirements evaluated, only when the target is our own team's
+                system (TESTER_SELF_URLS); omitted from cross-team reports.
+                Mapping: docs/testing-interface/model-coverage.md

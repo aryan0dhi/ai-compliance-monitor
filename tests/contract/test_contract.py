@@ -17,6 +17,7 @@ from tests.contract.cadence import cadence_violations
 from tests.contract.scenarios import (
     ScenarioRun,
     assert_error_body,
+    evaluated_tags,
     parse,
     sample_time,
     state_matches,
@@ -455,8 +456,14 @@ def test_ac02_gap_notification_reaches_the_reviewer(api, receiver, test_routes):
 
 
 def run_scenario(name, api, fixtures, receiver, test_routes, meta_phases, record_property):
-    """Runs the steps the target's phases cover; the rest are recorded as deferred, not skipped."""
-    deferred = ScenarioRun(api, fixtures, name, receiver, test_routes).run(meta_phases)
+    """Runs the steps the target's phases cover; the rest are recorded as deferred, not skipped.
+    `covers` is what the executed steps evaluated (the tester's coverage, D-31). It is recorded
+    even when a step fails, for the steps that completed before it."""
+    run = ScenarioRun(api, fixtures, name, receiver, test_routes)
+    try:
+        deferred = run.run(meta_phases)
+    finally:
+        record_property("covers", evaluated_tags(name, run.executed, run.deferred))
     record_property("deferred_steps", deferred)
 
 
