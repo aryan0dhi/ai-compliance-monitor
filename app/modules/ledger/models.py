@@ -28,6 +28,9 @@ class LedgerEntryType(StrEnum):
     REPORT_ASSEMBLED = "REPORT_ASSEMBLED"
     # A reviewer recorded that the report went to the authority (REQ-12, markReportSubmitted).
     REPORT_SUBMITTED = "REPORT_SUBMITTED"
+    # A disposition or report call on an existing event was refused (403/409); nothing changed.
+    # Written in its own transaction after the refusal (B-14, Model 5 Ex-4; D-26).
+    REFUSED = "REFUSED"
 
 
 class LedgerEntry(Base):

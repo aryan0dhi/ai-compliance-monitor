@@ -428,10 +428,23 @@ class TestHttp:
             == hashlib.sha256(stored.document.encode()).hexdigest()
         )
 
-    def test_premature_report_is_409_with_error_body(self, http, event_id):
+    def test_premature_report_is_409_with_error_body(self, http, ledger, event_id, reviewer):
         resp = http.get(event_id)
         assert resp.status_code == 409
         assert set(resp.json()) == {"detail"}
+        # D-26 / Ex-4 premature-report: the attempt is in the ledger, attributed to the caller.
+        (call,) = ledger.calls
+        assert call["entry_type"] == LedgerEntryType.REFUSED
+        assert (call["event_id"], call["actor_id"]) == (event_id, reviewer.actor_id)
+        assert call["payload"]["operation"] == "getReport"
+        assert call["payload"]["status"] == 409
+
+    def test_refused_submission_is_recorded(self, http, ledger, disposed):
+        http.principal = user_principal(Role.VIEWER)
+        assert http.submit(disposed).status_code == 403
+        assert [(c["entry_type"], c["payload"]["operation"]) for c in ledger.calls] == [
+            (LedgerEntryType.REFUSED, "markReportSubmitted")
+        ]
 
     def test_viewer_is_403_even_for_an_unknown_event(self, http):
         http.principal = user_principal(Role.VIEWER)

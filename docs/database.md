@@ -232,6 +232,9 @@ determination can't be deleted.
   (D-14). `event_id` references `event` with RESTRICT, so an audited event can't be deleted.
 - `actor_id` deliberately has no FK, so an export can be verified on its own.
 - Tampering is detected, not prevented (Ex-5, AC-06): `GET /v1/ledger/verify` re-walks the chain.
+- `entry_type` (`ck_ledger_entry_entry_type`): `FLAGGED`, `VIEW`, `GAP_OPENED`, `GAP_CLOSED`,
+  `NOTIFIED`, `DISPOSITION` (0006), `REPORT_ASSEMBLED`, `REPORT_SUBMITTED` (0009) and `REFUSED`
+  (0010: a refused disposition or report call on an existing event, D-26).
 
 ### `webhook`, `notification`, `notification_delivery` (module `notifications`, REQ-04)
 - `notification` is the outbox row written in the event's transaction; `deliver_by` = created +

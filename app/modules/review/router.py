@@ -2,6 +2,8 @@
 POST /v1/events/{event_id}/report/submission. HTTP mapping only; logic in review.disposition and
 review.report."""
 
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from app.core.clock import Clock, get_clock
@@ -18,6 +20,7 @@ from app.modules.review.disposition import (
     authorize_disposition,
     record_disposition,
 )
+from app.modules.review.refusals import record_refusal
 from app.modules.review.report import (
     ReportDenied,
     ReportUnavailable,
@@ -58,10 +61,10 @@ def record_disposition_route(
 
     A repeat call appends a revision; nothing is overwritten (B-09). deadline_utc follows B-10.
     """
+    parsed_id = to_internal_id(event_id)
     try:
         # The role first, so a non-reviewer gets 403 for any id.
         authorize_disposition(principal)
-        parsed_id = to_internal_id(event_id)
         if parsed_id is None:
             raise EventNotFound(event_id)
         record = record_disposition(
@@ -73,14 +76,36 @@ def record_disposition_route(
             clock=clock,
         )
     except DispositionDenied as exc:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+        raise _refused(exc, 403, "recordDisposition", parsed_id, principal, uow, ledger) from exc
     except EventNotFound as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "event not found") from exc
     except MissingRationale as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     except DispositionConflict as exc:
-        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+        raise _refused(exc, 409, "recordDisposition", parsed_id, principal, uow, ledger) from exc
     return EventDetail.from_record(record)
+
+
+def _refused(
+    exc: Exception,
+    status_code: int,
+    operation: str,
+    event_id: UUID | None,
+    principal: Principal,
+    uow: UnitOfWork,
+    ledger: LedgerWriter,
+) -> HTTPException:
+    """The HTTP error for a refused call, after recording the attempt in the ledger (D-26)."""
+    record_refusal(
+        event_id,
+        operation=operation,
+        status_code=status_code,
+        reason=str(exc),
+        principal=principal,
+        uow=uow,
+        ledger=ledger,
+    )
+    return HTTPException(status_code, str(exc))
 
 
 _REPORT_RESPONSES: dict[int | str, dict[str, str]] = {
@@ -90,12 +115,18 @@ _REPORT_RESPONSES: dict[int | str, dict[str, str]] = {
 }
 
 
-def _report_errors(exc: Exception) -> HTTPException:
-    if isinstance(exc, ReportDenied):
-        return HTTPException(status.HTTP_403_FORBIDDEN, str(exc))
+def _report_errors(
+    exc: Exception,
+    operation: str,
+    event_id: UUID | None,
+    principal: Principal,
+    uow: UnitOfWork,
+    ledger: LedgerWriter,
+) -> HTTPException:
     if isinstance(exc, EventNotFound):
         return HTTPException(status.HTTP_404_NOT_FOUND, "event not found")
-    return HTTPException(status.HTTP_409_CONFLICT, str(exc))
+    code = 403 if isinstance(exc, ReportDenied) else 409
+    return _refused(exc, code, operation, event_id, principal, uow, ledger)
 
 
 @router.get(
@@ -123,14 +154,14 @@ def get_report_route(
     Assembled on the first call after a serious-tier disposition; every later call returns the
     same bytes until a revision or the submission mark (D-25).
     """
+    parsed_id = to_internal_id(event_id)
     try:
         authorize_report(principal)
-        parsed_id = to_internal_id(event_id)
         if parsed_id is None:
             raise EventNotFound(event_id)
         report = get_report(parsed_id, principal=principal, uow=uow, ledger=ledger, clock=clock)
     except (ReportDenied, EventNotFound, ReportUnavailable) as exc:
-        raise _report_errors(exc) from exc
+        raise _report_errors(exc, "getReport", parsed_id, principal, uow, ledger) from exc
     return Response(report_body(report), media_type="application/json")
 
 
@@ -158,9 +189,9 @@ def mark_report_submitted_route(
 ) -> Response:
     """Record that the reviewer submitted the report to the authority, which happens outside
     the system. Returns the report with submitted_at set."""
+    parsed_id = to_internal_id(event_id)
     try:
         authorize_report(principal)
-        parsed_id = to_internal_id(event_id)
         if parsed_id is None:
             raise EventNotFound(event_id)
         report = mark_report_submitted(
@@ -172,5 +203,5 @@ def mark_report_submitted_route(
             clock=clock,
         )
     except (ReportDenied, EventNotFound, ReportUnavailable) as exc:
-        raise _report_errors(exc) from exc
+        raise _report_errors(exc, "markReportSubmitted", parsed_id, principal, uow, ledger) from exc
     return Response(report_body(report), media_type="application/json")

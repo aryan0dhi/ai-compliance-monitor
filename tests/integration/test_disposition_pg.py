@@ -148,7 +148,9 @@ def test_model5_ex2_not_serious(stack):
     assert (closed.json()["state"], closed.json()["deadline_utc"]) == ("CLOSED", None)
 
 
-def test_refusals_write_nothing(stack):
+def test_refusals_change_nothing_and_are_audited(stack):
+    """A refused call changes nothing; each 403/409 on a real event adds one REFUSED entry
+    attributed to the caller (D-26). Unknown ids add none."""
     event_id = stack.breach()
     before = stack.audit(event_id)
     assert (
@@ -159,7 +161,24 @@ def test_refusals_write_nothing(stack):
     partial = {k: v for k, v in EX1_FIELDS.items() if k != "health_safety"}
     assert stack.dispose(event_id, {"tier": "DEATH", "harm_fields": partial}).status_code == 409
     assert stack.dispose(str(uuid.uuid4()), {"tier": "DEATH"}).status_code == 404
-    assert stack.audit(event_id) == before
+    new = stack.audit(event_id)[len(before) :]
+    assert [e["action"] for e in new] == ["REFUSED"] * 3
+    assert [e["actor_id"] for e in new] == [
+        str(stack.keys["viewer"].user_id),
+        str(stack.keys["reviewer"].user_id),
+        str(stack.keys["reviewer"].user_id),
+    ]
+    with stack.sessionmaker() as s:
+        entries = s.scalars(
+            select(LedgerEntry).where(LedgerEntry.entry_type == "REFUSED").order_by(LedgerEntry.seq)
+        ).all()
+        assert [(e.payload["operation"], e.payload["status"]) for e in entries] == [
+            ("recordDisposition", 403),
+            ("recordDisposition", 409),
+            ("recordDisposition", 409),
+        ]
+        assert entries[0].payload["role"] == "viewer"
+    assert verify_ledger(principal=user_principal(Role.VIEWER), uow=stack.make_uow()).valid
     with stack.sessionmaker() as s:
         assert s.scalars(select(Disposition)).all() == []
     event = stack.call("GET", f"/v1/events/{event_id}", "viewer").json()
