@@ -83,7 +83,7 @@ def test_ac18_erasure_keeps_every_hash_and_the_chain_verifies(stack, clock):  # 
     event = stack.call("GET", f"/v1/events/{event_id}", "viewer").json()
     assert event["revision_history"][0]["rationale"] is None
     assert event["personal_data_erased_at"] == due.isoformat().replace("+00:00", "Z")
-    assert [a["action"] for a in stack.audit(event_id)][-2:] == ["PERSONAL_DATA_ERASED", "VIEW"]
+    assert [a["action"] for a in stack.audit(event_id)][-2:] == ["RECORD_ERASED", "VIEW"]
     assert stack.report(event_id).status_code == 409
 
 
@@ -188,3 +188,59 @@ def test_0012_seals_existing_rows_and_downgrade_opens_them(scratch_db, monkeypat
     assert call("GET", f"/v1/events/{event_id}/report", "reviewer").content.startswith(
         report.content[: report.content.rindex(b',"report_sha256"')]
     )
+
+
+def test_delta6_erasure_on_request_on_postgres(stack, clock):  # noqa: F811
+    """Contract delta Δ6 / A4 on PostgreSQL: 409 before retain_until, 200 from it, then
+    ALREADY_ERASED; one RECORD_ERASED entry by the reviewer; the chain still verifies. An event
+    with no personal data gets an already-destroyed key (ck_record_key_destroyed_has_no_key)."""
+    event_id = full_event(stack)
+    with stack.make_uow() as uow:
+        system_id = uow.events.get(uuid.UUID(event_id)).system_id
+    later_sample = {
+        "system_id": str(system_id),
+        "metric_name": "accuracy",
+        "metric_type": "performance",
+        "value": 0.5,
+        "timestamp": (T0 + timedelta(minutes=5)).isoformat(),
+    }
+    flagged = stack.call("POST", "/v1/metrics", "system", json=later_sample)
+    assert flagged.status_code == 201, flagged.text
+    bare_id = flagged.json()["flagged_event_id"]
+    with stack.make_uow() as uow:
+        retain_until = uow.events.get(uuid.UUID(event_id)).retain_until
+    clock.advance(seconds=(retain_until - clock.now()).total_seconds() - 1)
+    early = stack.call("POST", f"/v1/events/{event_id}/erasure", "reviewer")
+    assert early.status_code == 409 and early.json()["error_code"] == "RETENTION_NOT_EXPIRED"
+
+    clock.advance(seconds=1)
+    resp = stack.call("POST", f"/v1/events/{event_id}/erasure", "reviewer", json={})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["erased_fields"] == [
+        "disposition.rationale",
+        "harm_fields.evidence",
+        "report.document",
+        "report.submission_note",
+    ]
+    again = stack.call("POST", f"/v1/events/{event_id}/erasure", "reviewer")
+    assert again.status_code == 409 and again.json()["error_code"] == "ALREADY_ERASED"
+    assert stack.call("POST", f"/v1/events/{event_id}/erasure", "viewer").status_code == 403
+
+    bare = stack.call("POST", f"/v1/events/{bare_id}/erasure", "reviewer")
+    assert bare.status_code == 200 and bare.json()["erased_fields"] == []
+
+    with stack.sessionmaker() as s:
+        entries = s.scalars(
+            select(LedgerEntry).where(LedgerEntry.entry_type == "RECORD_ERASED")
+        ).all()
+        assert [(str(e.event_id), e.payload["trigger"]) for e in entries] == [
+            (event_id, "MANUAL"),
+            (bare_id, "MANUAL"),
+        ]
+        assert {e.actor_id for e in entries} == {stack.keys["reviewer"].user_id}
+        bare_key = s.get(RecordKey, uuid.UUID(bare_id))
+        assert bare_key.wrapped_key is None and bare_key.destroyed_at is not None
+    assert verify_ledger(principal=user_principal(Role.VIEWER), uow=stack.make_uow()).valid
+    # The retention job leaves both alone (already erased).
+    clock.advance(days=2)
+    assert erase_expired(stack.make_uow, ledger=get_ledger(), clock=clock).erased == []
