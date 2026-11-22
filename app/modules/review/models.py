@@ -4,9 +4,9 @@
 HarmFieldName is also used by monitored_system.harm_fields (D-20).
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import CheckConstraint, ForeignKey, ForeignKeyConstraint
 from sqlalchemy.orm import Mapped, mapped_column
@@ -157,6 +157,8 @@ class Report(Base):
 
     # References the event through fk_report_disposition (disposition.event_id → event.id).
     event_id: Mapped[UUID] = mapped_column(primary_key=True)
+    # Stable id of this report version (contract delta \u03944: GET /v1/reports/{report_id}).
+    id: Mapped[UUID] = mapped_column(unique=True, default=uuid4)
     disposition_seq: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
     document: Mapped[str]
     report_sha256: Mapped[str]
@@ -169,3 +171,42 @@ class Report(Base):
         ForeignKey("app_user.id", ondelete="RESTRICT")
     )
     submission_note: Mapped[str | None]
+
+
+class SubmissionKind(StrEnum):
+    """The event's first submission is INITIAL; every later one is a FOLLOW_UP (\u03943)."""
+
+    INITIAL = "INITIAL"
+    FOLLOW_UP = "FOLLOW_UP"
+
+
+class ReportType(StrEnum):
+    """The Article 73 report type the reviewer declares when recording a submission (\u03943)."""
+
+    INITIAL = "Initial"
+    FOLLOW_UP = "Follow up"
+    COMBINED = "Combined initial and final"
+    FINAL = "Final (Reportable incident)"
+
+
+class ReportSubmission(Base):
+    """A reviewer's record that one report version went to the authority (contract delta \u03943).
+    The submission itself happens outside the system. Insert-only; one per report version."""
+
+    __tablename__ = "report_submission"
+    __table_args__ = (
+        check_in("submission_kind", SubmissionKind, name="submission_kind"),
+        check_in("report_type", ReportType, name="report_type"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    event_id: Mapped[UUID] = mapped_column(ForeignKey("event.id", ondelete="RESTRICT"))
+    report_id: Mapped[UUID] = mapped_column(
+        ForeignKey("report.id", ondelete="RESTRICT"), unique=True
+    )
+    submitted_by: Mapped[UUID] = mapped_column(ForeignKey("app_user.id", ondelete="RESTRICT"))
+    submitted_at: Mapped[datetime]
+    submission_kind: Mapped[str]
+    report_type: Mapped[str]
+    expected_next_report_date: Mapped[date | None]
+    authority_reference: Mapped[str | None]

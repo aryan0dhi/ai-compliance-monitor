@@ -13,11 +13,11 @@ from app.modules.events.schemas import EventDetail
 from app.modules.events.service import get_event
 from app.modules.ledger.interface import LedgerEntryType, get_ledger
 from app.modules.notifications.interface import get_notifier
-from app.modules.records.service import PERSONAL_FIELDS, erase_expired
+from app.modules.records.service import erase_expired
 from app.modules.review.disposition import FieldConfirmation
 from app.modules.review.models import HarmFieldStatus
 from tests.fakes import RecordingNotifier, system_principal, user_principal
-from tests.test_records import NOTE, RATIONALE, full  # noqa: F401 - fixture
+from tests.test_records import ERASED_FIELDS, RATIONALE, full  # noqa: F401 - fixture
 from tests.test_report import (  # noqa: F401 - fixtures
     EX1_FIELDS,
     NOT_SERIOUS,
@@ -72,13 +72,13 @@ class TestErase:
         assert resp.json() == {
             "event_id": str(full),
             "erased_at": clock.now().isoformat().replace("+00:00", "Z"),
-            "erased_fields": list(PERSONAL_FIELDS),
+            "erased_fields": ERASED_FIELDS,
         }
         (entry,) = ledger.calls
         assert entry["entry_type"] == LedgerEntryType.RECORD_ERASED
         assert entry["actor_id"] == reviewer.actor_id
         assert entry["payload"]["trigger"] == "MANUAL"
-        assert entry["payload"]["erased_fields"] == list(PERSONAL_FIELDS)
+        assert entry["payload"]["erased_fields"] == ERASED_FIELDS
         detail = _view(uow, ledger, full)
         assert detail.personal_data_erased_at == clock.now()
         assert [r.rationale for r in detail.revision_history] == [None]
@@ -182,4 +182,4 @@ def test_window_is_retain_until_not_the_retention_job_cutoff(api, uow, clock, fu
     assert clock.now() < uow.events.get(full).retain_until + timedelta(days=1)
 
 
-_ = (OTHER, NOTE)
+_ = (OTHER,)

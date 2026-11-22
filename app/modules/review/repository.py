@@ -6,7 +6,13 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.modules.review.models import Disposition, HarmField, HarmFieldName, Report
+from app.modules.review.models import (
+    Disposition,
+    HarmField,
+    HarmFieldName,
+    Report,
+    ReportSubmission,
+)
 
 # Response and storage order: Art. 3(49) order, as listed in HarmFieldName.
 _ORDER = {name.value: i for i, name in enumerate(HarmFieldName)}
@@ -61,6 +67,12 @@ class ReportRepository(Protocol):
         """The report assembled from this disposition, if any."""
         ...
 
+    def by_id(self, report_id: UUID) -> Report | None: ...
+
+    def for_event(self, event_id: UUID) -> list[Report]:
+        """Every report version of the event, oldest first (disposition order)."""
+        ...
+
 
 class SqlReportRepository:
     def __init__(self, session: Session) -> None:
@@ -72,3 +84,35 @@ class SqlReportRepository:
 
     def get(self, event_id: UUID, disposition_seq: int) -> Report | None:
         return self._session.get(Report, (event_id, disposition_seq))
+
+    def by_id(self, report_id: UUID) -> Report | None:
+        return self._session.scalars(select(Report).where(Report.id == report_id)).first()
+
+    def for_event(self, event_id: UUID) -> list[Report]:
+        stmt = select(Report).where(Report.event_id == event_id).order_by(Report.disposition_seq)
+        return list(self._session.scalars(stmt))
+
+
+class SubmissionRepository(Protocol):
+    def add(self, submission: ReportSubmission) -> None: ...
+
+    def for_event(self, event_id: UUID) -> list[ReportSubmission]:
+        """The event's submissions, oldest first."""
+        ...
+
+
+class SqlSubmissionRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, submission: ReportSubmission) -> None:
+        self._session.add(submission)
+        self._session.flush()
+
+    def for_event(self, event_id: UUID) -> list[ReportSubmission]:
+        stmt = (
+            select(ReportSubmission)
+            .where(ReportSubmission.event_id == event_id)
+            .order_by(ReportSubmission.submitted_at, ReportSubmission.id)
+        )
+        return list(self._session.scalars(stmt))

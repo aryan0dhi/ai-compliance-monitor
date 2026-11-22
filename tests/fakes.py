@@ -35,7 +35,13 @@ from app.modules.notifications.models import (
 )
 from app.modules.notifications.outbox import build_notification
 from app.modules.records.models import RecordKey
-from app.modules.review.models import Disposition, HarmField, HarmFieldName, Report
+from app.modules.review.models import (
+    Disposition,
+    HarmField,
+    HarmFieldName,
+    Report,
+    ReportSubmission,
+)
 from app.modules.systems.models import MonitoredSystem
 from app.modules.thresholds.models import ThresholdVersion
 
@@ -216,6 +222,31 @@ class FakeReportRepository:
     def get(self, event_id: UUID, disposition_seq: int) -> Report | None:
         return self.rows.get((event_id, disposition_seq))
 
+    def by_id(self, report_id: UUID) -> Report | None:
+        return next((r for r in self.rows.values() if r.id == report_id), None)
+
+    def for_event(self, event_id: UUID) -> list[Report]:
+        return sorted(
+            (r for (e, _), r in self.rows.items() if e == event_id),
+            key=lambda r: r.disposition_seq,
+        )
+
+
+class FakeSubmissionRepository:
+    def __init__(self) -> None:
+        self.rows: list[ReportSubmission] = []
+
+    def add(self, submission: ReportSubmission) -> None:
+        if any(s.report_id == submission.report_id for s in self.rows):
+            raise ValueError("duplicate submission")  # uq on report_id in SQL
+        self.rows.append(submission)
+
+    def for_event(self, event_id: UUID) -> list[ReportSubmission]:
+        return sorted(
+            (s for s in self.rows if s.event_id == event_id),
+            key=lambda s: (s.submitted_at, str(s.id)),
+        )
+
 
 class FakeRecordKeyRepository:
     def __init__(self, events: FakeEventRepository) -> None:
@@ -359,6 +390,7 @@ class FakeUnitOfWork:
         self.dispositions = FakeDispositionRepository()
         self.reports = FakeReportRepository()
         self.record_keys = FakeRecordKeyRepository(self.events)
+        self.report_submissions = FakeSubmissionRepository()
         self.auth = FakeAuthRepository()
         self.ledger = FakeLedgerRepository()
         self.ledger_checks = FakeLedgerCheckRepository()
@@ -377,6 +409,7 @@ class FakeUnitOfWork:
             self.dispositions,
             self.reports,
             self.record_keys,
+            self.report_submissions,
             self.auth,
             self.ledger,
             self.ledger_checks,

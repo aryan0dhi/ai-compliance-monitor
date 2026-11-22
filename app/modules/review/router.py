@@ -1,5 +1,6 @@
-"""POST /v1/events/{event_id}/disposition, GET /v1/events/{event_id}/report and
-POST /v1/events/{event_id}/report/submission. HTTP mapping only; logic in review.disposition and
+"""POST /v1/events/{event_id}/disposition, GET /v1/events/{event_id}/report,
+POST /v1/events/{event_id}/report/submission, GET /v1/events/{event_id}/reports and
+GET /v1/reports/{report_id}. HTTP mapping only; logic in review.disposition and
 review.report."""
 
 from uuid import UUID
@@ -24,16 +25,29 @@ from app.modules.review.disposition import (
 )
 from app.modules.review.refusals import record_refusal
 from app.modules.review.report import (
+    RecordErased,
     ReportDenied,
+    ReportNotFound,
     ReportUnavailable,
+    SubmissionRequest,
     authorize_report,
     get_report,
-    mark_report_submitted,
+    get_report_version,
+    list_report_versions,
+    submit_report,
 )
-from app.modules.review.report_schemas import ReportOut, ReportSubmissionIn, report_body
+from app.modules.review.report_schemas import (
+    ReportOut,
+    ReportSubmissionIn,
+    ReportVersionOut,
+    SubmissionOut,
+    report_body,
+)
 from app.modules.review.schemas import DispositionIn
 
 router = APIRouter(prefix="/events", tags=["review"])
+# GET /v1/reports/{report_id} (contract delta \u03944).
+reports_router = APIRouter(prefix="/reports", tags=["reports"])
 
 
 @router.post(
@@ -127,6 +141,10 @@ def _report_errors(
 ) -> StarletteHTTPException:
     if isinstance(exc, EventNotFound):
         return HTTPException(status.HTTP_404_NOT_FOUND, "event not found")
+    if isinstance(exc, ReportNotFound):
+        return HTTPException(status.HTTP_404_NOT_FOUND, "report not found")
+    if isinstance(exc, RecordErased):
+        return http_error(status.HTTP_410_GONE, exc)
     code = 403 if isinstance(exc, ReportDenied) else 409
     return _refused(exc, code, operation, event_id, principal, uow, ledger)
 
@@ -169,41 +187,127 @@ def get_report_route(
 
 @router.post(
     "/{event_id}/report/submission",
-    response_model=ReportOut,
-    operation_id="markReportSubmitted",
+    status_code=status.HTTP_201_CREATED,
+    response_model=SubmissionOut,
+    operation_id="submitReport",
     tags=["reports"],
     responses={
         **_REPORT_RESPONSES,
-        400: {"description": "Malformed body (note longer than 2000 characters)"},
+        400: {"description": "MALFORMED_BODY"},
+        404: {"description": "Unknown event_id, or a report_id that isn't one of its versions"},
         409: {
-            "description": "No report of the current serious-tier determination has been "
-            "assembled yet, or it is already marked submitted"
+            "description": "NOT_SUBMITTABLE, REPORT_NOT_CURRENT, REPORT_HASH_MISMATCH or "
+            "REPORT_ALREADY_SUBMITTED"
         },
+        410: {"description": "RECORD_ERASED: the event's personal data was erased"},
     },
 )
-def mark_report_submitted_route(
+def submit_report_route(
     event_id: str,
-    body: ReportSubmissionIn | None = None,
+    body: ReportSubmissionIn,
     principal: Principal = Depends(get_principal),
     uow: UnitOfWork = Depends(get_uow),
     ledger: LedgerWriter = Depends(get_ledger),
     clock: Clock = Depends(get_clock),
-) -> Response:
-    """Record that the reviewer submitted the report to the authority, which happens outside
-    the system. Returns the report with submitted_at set."""
+) -> SubmissionOut:
+    """Record that the reviewer submitted a report version to the authority (contract delta
+    \u03943). Nothing is sent: the submission itself happens outside the system."""
     parsed_id = to_internal_id(event_id)
     try:
         authorize_report(principal)
         if parsed_id is None:
             raise EventNotFound(event_id)
-        report = mark_report_submitted(
+        report_id = to_internal_id(body.report_id)
+        if report_id is None:
+            raise ReportNotFound(body.report_id)
+        submission = submit_report(
             parsed_id,
-            body.note if body is not None else None,
+            SubmissionRequest(
+                report_id=report_id,
+                json_sha256=body.json_sha256,
+                report_type=body.report_type,
+                expected_next_report_date=body.expected_next_report_date,
+                authority_reference=body.authority_reference,
+            ),
             principal=principal,
             uow=uow,
             ledger=ledger,
             clock=clock,
         )
-    except (ReportDenied, EventNotFound, ReportUnavailable) as exc:
-        raise _report_errors(exc, "markReportSubmitted", parsed_id, principal, uow, ledger) from exc
+    except (ReportDenied, EventNotFound, ReportNotFound, RecordErased, ReportUnavailable) as exc:
+        raise _report_errors(exc, "submitReport", parsed_id, principal, uow, ledger) from exc
+    return SubmissionOut.from_submission(submission)
+
+
+@router.get(
+    "/{event_id}/reports",
+    response_model=list[ReportVersionOut],
+    operation_id="listReportVersions",
+    tags=["reports"],
+    responses={
+        401: {"description": "Missing or invalid API key"},
+        403: {"description": "Only reviewer and viewer keys list report versions"},
+        404: {"description": "Unknown event_id"},
+    },
+)
+def list_report_versions_route(
+    event_id: str,
+    principal: Principal = Depends(get_principal),
+    uow: UnitOfWork = Depends(get_uow),
+) -> list[ReportVersionOut]:
+    """Every stored report version of the event, oldest first, with its status (contract delta
+    \u03944). A bare array, like the audit trail."""
+    try:
+        parsed_id = to_internal_id(event_id)
+        if parsed_id is None:
+            raise EventNotFound(event_id)
+        versions = list_report_versions(parsed_id, principal=principal, uow=uow)
+    except ReportDenied as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    except EventNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "event not found") from exc
+    return [
+        ReportVersionOut(
+            report_id=v.report.id,
+            event_id=v.report.event_id,
+            report_version=v.report.disposition_seq,
+            status=v.status.value,
+            assembled_at=v.report.assembled_at,
+            report_sha256=v.report.report_sha256,
+            submitted_at=v.report.submitted_at,
+        )
+        for v in versions
+    ]
+
+
+@reports_router.get(
+    "/{report_id}",
+    response_model=ReportOut,
+    operation_id="getReportVersion",
+    responses={
+        401: {"description": "Missing or invalid API key"},
+        403: {"description": "Only reviewer keys read reports (REQ-13)"},
+        404: {"description": "Unknown report_id"},
+        410: {"description": "RECORD_ERASED: the event's personal data was erased"},
+    },
+)
+def get_report_version_route(
+    report_id: str,
+    principal: Principal = Depends(get_principal),
+    uow: UnitOfWork = Depends(get_uow),
+    ledger: LedgerWriter = Depends(get_ledger),
+) -> Response:
+    """One stored report version, byte for byte as assembled (contract delta \u03944)."""
+    try:
+        authorize_report(principal)
+        parsed_id = to_internal_id(report_id)
+        if parsed_id is None:
+            raise ReportNotFound(report_id)
+        report = get_report_version(parsed_id, principal=principal, uow=uow, ledger=ledger)
+    except ReportDenied as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    except ReportNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "report not found") from exc
+    except RecordErased as exc:
+        raise http_error(status.HTTP_410_GONE, exc) from exc
     return Response(report_body(report), media_type="application/json")

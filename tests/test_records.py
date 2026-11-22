@@ -16,12 +16,10 @@ from app.modules.events.service import get_event
 from app.modules.ledger.interface import LedgerEntryType
 from app.modules.records import crypto
 from app.modules.records.service import (
-    PERSONAL_FIELDS,
     erase_expired,
     erasure_due_at,
     evidence_purpose,
     master_key,
-    note_purpose,
     rationale_purpose,
     report_purpose,
 )
@@ -42,8 +40,9 @@ from tests.test_report import (  # noqa: F401 - fixtures
 
 RATIONALE = "reviewer spoke to the affected applicant, Ms Example"
 EVIDENCE = "credit denied to applicants"
-NOTE = "sent to the authority by J. Doe"
-SECRETS = (RATIONALE, EVIDENCE, NOTE)
+SECRETS = (RATIONALE, EVIDENCE)
+# What the `full` event holds: no submission note since contract delta \u03943 (D-29).
+ERASED_FIELDS = ["disposition.rationale", "harm_fields.evidence", "report.document"]
 
 
 @pytest.fixture(autouse=True)
@@ -167,7 +166,8 @@ def full(uow, ledger, clock, event_id, reviewer):  # noqa: F811 - pytest fixture
     """Ex-1 with every kind of personal data: evidence, rationale, report and note."""
     dispose(uow, ledger, clock, event_id, reviewer, OTHER, rationale=RATIONALE, fields=EX1_FIELDS)
     report(uow, ledger, clock, event_id, reviewer)
-    submit(uow, ledger, clock, event_id, reviewer, note=NOTE)
+    stored = report(uow, ledger, clock, event_id, reviewer)
+    submit(uow, ledger, clock, event_id, reviewer, stored, authority_reference="MSA-2026-0042")
     return event_id
 
 
@@ -179,7 +179,6 @@ def _stored(uow, event):
         rationale_purpose(1): d.rationale,
         evidence_purpose("fundamental_rights"): rights.evidence,
         report_purpose(1): row.document,
-        note_purpose(1): row.submission_note,
     }
 
 
@@ -195,7 +194,6 @@ class TestLifecycle:
         for purpose, value in stored.items():
             assert crypto.is_token(value), purpose
         assert opened(uow, full, rationale_purpose(1), stored[rationale_purpose(1)]) == RATIONALE
-        assert opened(uow, full, note_purpose(1), stored[note_purpose(1)]) == NOTE
         assert RATIONALE in opened(uow, full, report_purpose(1), stored[report_purpose(1)])
         logged = repr(ledger.calls)
         for secret in SECRETS:
@@ -230,7 +228,7 @@ class TestLifecycle:
                     "retain_until": event.retain_until.isoformat(),
                     "erased_at": due.isoformat(),
                     "trigger": "RETENTION",
-                    "erased_fields": list(PERSONAL_FIELDS),
+                    "erased_fields": ERASED_FIELDS,
                 },
                 "event_id": full,
             }
@@ -291,7 +289,8 @@ class TestLifecycle:
             erase_expired(lambda: uow, ledger=ledger, clock=clock)
         assert uow.record_keys.get(full).wrapped_key is not None
         ledger.fail_with = None
-        assert opened(uow, full, note_purpose(1), uow.reports.get(full, 1).submission_note) == NOTE
+        (d,) = uow.dispositions.for_event(full)
+        assert opened(uow, full, rationale_purpose(1), d.rationale) == RATIONALE
 
     def test_events_without_personal_data_have_no_key(self, uow, ledger, clock, event_id):  # noqa: F811
         assert uow.record_keys.get(event_id) is None

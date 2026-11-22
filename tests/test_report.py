@@ -6,7 +6,7 @@ Service rules on the in-memory unit of work, then the HTTP mapping with dependen
 
 import hashlib
 import json
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -24,18 +24,28 @@ from app.modules.ledger.interface import LedgerEntryType, get_ledger
 from app.modules.metrics.models import MetricType
 from app.modules.metrics.service import MetricSubmission, ingest_metric
 from app.modules.notifications.interface import get_notifier
-from app.modules.records.service import note_purpose, report_purpose
+from app.modules.records.service import erase_expired, report_purpose
 from app.modules.review.disposition import (
     DispositionRequest,
     FieldConfirmation,
     record_disposition,
 )
-from app.modules.review.models import DispositionTier, HarmFieldName, HarmFieldStatus
+from app.modules.review.models import DispositionTier, HarmFieldName, HarmFieldStatus, ReportType
 from app.modules.review.report import (
+    NotSubmittable,
+    RecordErased,
+    ReportAlreadySubmitted,
     ReportDenied,
+    ReportHashMismatch,
+    ReportNotCurrent,
+    ReportNotFound,
+    ReportStatus,
     ReportUnavailable,
+    SubmissionRequest,
     get_report,
-    mark_report_submitted,
+    get_report_version,
+    list_report_versions,
+    submit_report,
 )
 from app.modules.review.report_schemas import ReportOut, report_body
 from tests.conftest import T0
@@ -117,9 +127,17 @@ def report(uow, ledger, clock, event_id, principal):
     return get_report(event_id, principal=principal, uow=uow, ledger=ledger, clock=clock)
 
 
-def submit(uow, ledger, clock, event_id, principal, note=None):
-    return mark_report_submitted(
-        event_id, note, principal=principal, uow=uow, ledger=ledger, clock=clock
+def submit(uow, ledger, clock, event_id, principal, version=None, *, json_sha256=None, **extra):
+    """Contract delta \u03943: record a submission of `version` (a report as GET returns it).
+    Without one, a report_id that no event has."""
+    request = SubmissionRequest(
+        report_id=version.report_id if version is not None else uuid4(),
+        json_sha256=json_sha256 or (version.report_sha256 if version is not None else "0" * 64),
+        report_type=extra.pop("report_type", ReportType.INITIAL),
+        **extra,
+    )
+    return submit_report(
+        event_id, request, principal=principal, uow=uow, ledger=ledger, clock=clock
     )
 
 
@@ -258,12 +276,13 @@ class TestRefusals:
 
     def test_revised_to_not_serious_is_409(self, uow, ledger, clock, disposed, reviewer):
         """A report assembled earlier isn't served once the current tier is NOT_SERIOUS."""
-        report(uow, ledger, clock, disposed, reviewer)
+        first = report(uow, ledger, clock, disposed, reviewer)
         dispose(uow, ledger, clock, disposed, reviewer, NOT_SERIOUS, rationale="no harm after all")
         with pytest.raises(ReportUnavailable, match="NOT_SERIOUS"):
             report(uow, ledger, clock, disposed, reviewer)
-        with pytest.raises(ReportUnavailable, match="NOT_SERIOUS"):
-            submit(uow, ledger, clock, disposed, reviewer)
+        # \u03943: the earlier version can't be submitted either.
+        with pytest.raises(NotSubmittable):
+            submit(uow, ledger, clock, disposed, reviewer, first)
 
     def test_monitoring_gap_is_409(self, uow, ledger, clock, reviewer):
         """INV-12: a gap is never reviewed, so it never has a report."""
@@ -280,7 +299,8 @@ class TestRefusals:
         uow.events.add(gap)
         with pytest.raises(ReportUnavailable, match="INV-12"):
             report(uow, ledger, clock, gap.id, reviewer)
-        with pytest.raises(ReportUnavailable, match="INV-12"):
+        # A gap has no report version, so any report_id is unknown for it.
+        with pytest.raises(ReportNotFound):
             submit(uow, ledger, clock, gap.id, reviewer)
 
     def test_unknown_event_is_404(self, uow, ledger, clock, reviewer):
@@ -311,74 +331,166 @@ class TestRefusals:
 
 
 class TestSubmission:
-    def test_marks_the_current_report_submitted(self, uow, ledger, clock, disposed, reviewer):
+    """Contract delta \u03943 (D-29): a submission names the report version and its hash."""
+
+    def test_records_an_initial_submission(self, uow, ledger, clock, disposed, reviewer):
         stored = report(uow, ledger, clock, disposed, reviewer)
-        document = stored.document
         clock.advance(hours=2)
-        submitted = submit(uow, ledger, clock, disposed, reviewer, note="sent via the portal")
+        ledger.calls.clear()
+        sub = submit(
+            uow,
+            ledger,
+            clock,
+            disposed,
+            reviewer,
+            stored,
+            expected_next_report_date=date(2026, 10, 5),
+            authority_reference="MSA-2026-0042",
+        )
+        assert (sub.event_id, sub.report_id, sub.submitted_by) == (
+            disposed,
+            stored.report_id,
+            reviewer.actor_id,
+        )
+        assert sub.submitted_at == T0.replace(minute=1) + timedelta(hours=6)
+        assert (sub.submission_kind, sub.report_type) == ("INITIAL", "Initial")
+        assert sub.expected_next_report_date == date(2026, 10, 5)
+        assert sub.authority_reference == "MSA-2026-0042"
+        assert ledger.calls == [
+            {
+                "session": None,
+                "entry_type": LedgerEntryType.REPORT_SUBMITTED,
+                "actor_id": reviewer.actor_id,
+                "payload": {
+                    "event_id": str(disposed),
+                    "submission_id": str(sub.id),
+                    "report_id": str(stored.report_id),
+                    "disposition_seq": 1,
+                    "report_sha256": stored.report_sha256,
+                    "submission_kind": "INITIAL",
+                    "report_type": "Initial",
+                    "submitted_at": "2026-09-28T02:01:00+00:00",
+                    "expected_next_report_date": "2026-10-05",
+                    "authority_reference": "MSA-2026-0042",
+                },
+                "event_id": disposed,
+            }
+        ]
 
-        assert (submitted.event_id, submitted.disposition_seq) == (stored.event_id, 1)
-        assert submitted.submitted_at == T0.replace(minute=1) + timedelta(hours=6)
-        assert submitted.submitted_by == reviewer.actor_id
-        assert submitted.submission_note == "sent via the portal"
-        assert submitted.document == document  # the document itself never changes
-        # Note sealed in the row and in the ledger (REQ-16); same token in both.
-        sealed_note = uow.reports.get(disposed, 1).submission_note
-        assert opened(uow, disposed, note_purpose(1), sealed_note) == "sent via the portal"
-        assert ledger.calls[-1] == {
-            "session": None,
-            "entry_type": LedgerEntryType.REPORT_SUBMITTED,
-            "actor_id": reviewer.actor_id,
-            "payload": {
-                "event_id": str(disposed),
-                "disposition_seq": 1,
-                "report_sha256": stored.report_sha256,
-                "submitted_at": "2026-09-28T02:01:00+00:00",
-                "note": sealed_note,
-            },
-            "event_id": disposed,
-        }
-        body = json.loads(report_body(submitted))
-        assert body["submitted_at"] == "2026-09-28T02:01:00Z"
-        # The event itself doesn't change state (D-03: report states are internal).
-        assert uow.events.get(disposed).state == EventState.DISPOSITIONED
+    def test_later_reads_show_the_submission(self, uow, ledger, clock, disposed, reviewer):
+        stored = report(uow, ledger, clock, disposed, reviewer)
+        submit(uow, ledger, clock, disposed, reviewer, stored)
+        again = report(uow, ledger, clock, disposed, reviewer)
+        assert again.document == stored.document  # the document itself never changes
+        assert json.loads(report_body(again))["submitted_at"] == "2026-09-28T00:01:00Z"
 
-    def test_later_reads_return_the_submitted_report(self, uow, ledger, clock, disposed, reviewer):
-        report(uow, ledger, clock, disposed, reviewer)
-        submitted = report_body(submit(uow, ledger, clock, disposed, reviewer))
-        assert report_body(report(uow, ledger, clock, disposed, reviewer)) == submitted
+    def test_a_revision_is_submitted_as_a_follow_up(self, uow, ledger, clock, disposed, reviewer):
+        first = report(uow, ledger, clock, disposed, reviewer)
+        submit(uow, ledger, clock, disposed, reviewer, first)
+        clock.advance(days=3)
+        dispose(uow, ledger, clock, disposed, reviewer, DEATH)
+        second = report(uow, ledger, clock, disposed, reviewer)
+        follow = submit(
+            uow, ledger, clock, disposed, reviewer, second, report_type=ReportType.FOLLOW_UP
+        )
+        assert (follow.submission_kind, follow.report_type) == ("FOLLOW_UP", "Follow up")
 
-    def test_without_a_note(self, uow, ledger, clock, disposed, reviewer):
-        report(uow, ledger, clock, disposed, reviewer)
-        assert submit(uow, ledger, clock, disposed, reviewer).submission_note is None
+    def test_a_superseded_version_is_not_current(self, uow, ledger, clock, disposed, reviewer):
+        first = report(uow, ledger, clock, disposed, reviewer)
+        dispose(uow, ledger, clock, disposed, reviewer, DEATH)
+        with pytest.raises(ReportNotCurrent):
+            submit(uow, ledger, clock, disposed, reviewer, first)
 
-    def test_before_assembly_is_409(self, uow, ledger, clock, disposed, reviewer):
-        with pytest.raises(ReportUnavailable, match="GET it first"):
-            submit(uow, ledger, clock, disposed, reviewer)
-        assert ledger.calls == []
+    def test_a_wrong_hash_is_refused(self, uow, ledger, clock, disposed, reviewer):
+        stored = report(uow, ledger, clock, disposed, reviewer)
+        with pytest.raises(ReportHashMismatch):
+            submit(uow, ledger, clock, disposed, reviewer, stored, json_sha256="a" * 64)
+        assert uow.report_submissions.rows == []
 
-    def test_twice_is_409(self, uow, ledger, clock, disposed, reviewer):
-        report(uow, ledger, clock, disposed, reviewer)
-        first = submit(uow, ledger, clock, disposed, reviewer, note="first")
+    def test_twice_is_already_submitted(self, uow, ledger, clock, disposed, reviewer):
+        stored = report(uow, ledger, clock, disposed, reviewer)
+        submit(uow, ledger, clock, disposed, reviewer, stored)
         calls = len(ledger.calls)
-        clock.advance(hours=1)
-        with pytest.raises(ReportUnavailable, match="already marked submitted"):
-            submit(uow, ledger, clock, disposed, reviewer, note="second")
-        assert first.submission_note == "first" and len(ledger.calls) == calls
+        with pytest.raises(ReportAlreadySubmitted):
+            submit(uow, ledger, clock, disposed, reviewer, stored)
+        assert len(ledger.calls) == calls and len(uow.report_submissions.rows) == 1
 
-    def test_revision_after_submission_needs_a_new_report(
+    def test_a_report_of_another_event_is_unknown(
+        self, uow, ledger, clock, disposed, event_id, reviewer
+    ):
+        stored = report(uow, ledger, clock, disposed, reviewer)
+        other = uuid4()
+        uow.events.add(
+            Event(
+                id=other,
+                type=EventType.THRESHOLD_BREACH.value,
+                state=EventState.FLAGGED.value,
+                system_id=SYSTEM,
+                detected_at=T0,
+                retain_until=retain_until_for(T0),
+            )
+        )
+        with pytest.raises(ReportNotFound):
+            submit(uow, ledger, clock, other, reviewer, stored)
+
+    def test_after_erasure_it_is_gone(self, uow, ledger, clock, disposed, reviewer):
+        stored = report(uow, ledger, clock, disposed, reviewer)
+        clock.advance(days=400)
+        erase_expired(lambda: uow, ledger=ledger, clock=clock)
+        with pytest.raises(RecordErased):
+            submit(uow, ledger, clock, disposed, reviewer, stored)
+
+
+class TestVersions:
+    """Contract delta \u03944: report versions by event and by id."""
+
+    def test_statuses_follow_revisions_and_submissions(
         self, uow, ledger, clock, disposed, reviewer
     ):
-        """D-25: a submitted report belongs to its determination; a revision's report starts
-        unsubmitted and must be assembled before it can be marked."""
-        report(uow, ledger, clock, disposed, reviewer)
-        submit(uow, ledger, clock, disposed, reviewer)
+        first = report(uow, ledger, clock, disposed, reviewer)
+        viewer = user_principal(Role.VIEWER)
+        (only,) = list_report_versions(disposed, principal=viewer, uow=uow)
+        assert only.status is ReportStatus.ASSEMBLED
+        submit(uow, ledger, clock, disposed, reviewer, first)
         dispose(uow, ledger, clock, disposed, reviewer, DEATH)
-        with pytest.raises(ReportUnavailable, match="GET it first"):
-            submit(uow, ledger, clock, disposed, reviewer)
-        revised = report(uow, ledger, clock, disposed, reviewer)
-        assert revised.disposition_seq == 2 and revised.submitted_at is None
-        assert uow.reports.get(disposed, 1).submitted_at is not None
+        report(uow, ledger, clock, disposed, reviewer)
+        statuses = [v.status for v in list_report_versions(disposed, principal=viewer, uow=uow)]
+        assert statuses == [ReportStatus.SUBMITTED_SUPERSEDED, ReportStatus.ASSEMBLED]
+        dispose(uow, ledger, clock, disposed, reviewer, NOT_SERIOUS, rationale="no harm")
+        statuses = [v.status for v in list_report_versions(disposed, principal=viewer, uow=uow)]
+        assert statuses == [ReportStatus.SUBMITTED_SUPERSEDED, ReportStatus.SUPERSEDED]
+
+    def test_listing_roles(self, uow, ledger, clock, disposed, reviewer):
+        report(uow, ledger, clock, disposed, reviewer)
+        assert len(list_report_versions(disposed, principal=reviewer, uow=uow)) == 1
+        for principal in (user_principal(Role.ADMIN), system_principal(SYSTEM)):
+            with pytest.raises(ReportDenied):
+                list_report_versions(disposed, principal=principal, uow=uow)
+        with pytest.raises(EventNotFound):
+            list_report_versions(uuid4(), principal=reviewer, uow=uow)
+
+    def test_any_version_by_id_with_a_view_entry(self, uow, ledger, clock, disposed, reviewer):
+        first = report(uow, ledger, clock, disposed, reviewer)
+        dispose(uow, ledger, clock, disposed, reviewer, DEATH)
+        ledger.calls.clear()
+        again = get_report_version(first.report_id, principal=reviewer, uow=uow, ledger=ledger)
+        assert report_body(again) == report_body(first)
+        (view,) = ledger.calls
+        assert view["entry_type"] == LedgerEntryType.VIEW
+        assert view["payload"]["report_id"] == str(first.report_id)
+
+    def test_by_id_is_reviewer_only_404_and_410(self, uow, ledger, clock, disposed, reviewer):
+        stored = report(uow, ledger, clock, disposed, reviewer)
+        with pytest.raises(ReportDenied):
+            get_report_version(
+                stored.report_id, principal=user_principal(Role.VIEWER), uow=uow, ledger=ledger
+            )
+        with pytest.raises(ReportNotFound):
+            get_report_version(uuid4(), principal=reviewer, uow=uow, ledger=ledger)
+        clock.advance(days=400)
+        erase_expired(lambda: uow, ledger=ledger, clock=clock)
+        with pytest.raises(RecordErased):
+            get_report_version(stored.report_id, principal=reviewer, uow=uow, ledger=ledger)
 
 
 # --- HTTP ------------------------------------------------------------------------------------
@@ -450,54 +562,114 @@ class TestHttp:
 
     def test_refused_submission_is_recorded(self, http, ledger, disposed):
         http.principal = user_principal(Role.VIEWER)
-        assert http.submit(disposed).status_code == 403
+        assert http.submit(disposed, json=SUBMISSION).status_code == 403
         assert [(c["entry_type"], c["payload"]["operation"]) for c in ledger.calls] == [
-            (LedgerEntryType.REFUSED, "markReportSubmitted")
+            (LedgerEntryType.REFUSED, "submitReport")
         ]
 
     def test_viewer_is_403_even_for_an_unknown_event(self, http):
         http.principal = user_principal(Role.VIEWER)
         assert http.get(uuid4()).status_code == 403
-        assert http.submit(uuid4()).status_code == 403
+        assert http.submit(uuid4(), json=SUBMISSION).status_code == 403
 
     @pytest.mark.parametrize("event_id", ["not-an-id", str(uuid4())])
     def test_unknown_or_malformed_id_is_404(self, http, event_id):
         assert http.get(event_id).status_code == 404
-        assert http.submit(event_id).status_code == 404
+        assert http.submit(event_id, json=SUBMISSION).status_code == 404
 
-    def test_submission_with_and_without_body(self, http, uow, disposed):
-        assert http.get(disposed).status_code == 200
-        resp = http.submit(disposed)
-        assert resp.status_code == 200, resp.text
-        assert resp.json()["submitted_at"] == "2026-09-28T00:01:00Z"
-        assert uow.reports.get(disposed, 1).submission_note is None
-        # Marked once; a repeat is 409.
-        assert http.submit(disposed, json={"note": "again"}).status_code == 409
+    def test_submission_over_http(self, http, uow, disposed):
+        version = http.get(disposed).json()
+        body = {**SUBMISSION, "report_id": str(uow.reports.get(disposed, 1).id)}
+        body["json_sha256"] = version["report_sha256"]
+        resp = http.submit(disposed, json={**body, "authority_reference": "MSA-1"})
+        assert resp.status_code == 201, resp.text
+        out = resp.json()
+        assert out["submission_kind"] == "INITIAL" and out["report_type"] == "Initial"
+        assert out["event_id"] == str(disposed) and out["report_id"] == body["report_id"]
+        assert set(out) == {
+            "submission_id",
+            "report_id",
+            "event_id",
+            "submitted_by",
+            "submitted_at",
+            "submission_kind",
+            "report_type",
+            "expected_next_report_date",
+            "authority_reference",
+        }
+        again = http.submit(disposed, json=body)
+        assert again.status_code == 409
+        assert again.json()["error_code"] == "REPORT_ALREADY_SUBMITTED"
+        assert http.get(disposed).json()["submitted_at"] == out["submitted_at"]
 
-    def test_submission_returns_what_get_returns_next(self, http, disposed):
+    def test_hash_mismatch_over_http(self, http, uow, disposed):
         http.get(disposed)
-        submitted = http.submit(disposed, json={"note": "sent"})
-        assert submitted.status_code == 200, submitted.text
-        assert http.get(disposed).content == submitted.content
+        body = {**SUBMISSION, "report_id": str(uow.reports.get(disposed, 1).id)}
+        resp = http.submit(disposed, json=body)
+        assert resp.status_code == 409 and resp.json()["error_code"] == "REPORT_HASH_MISMATCH"
 
-    def test_submission_before_get_is_409(self, http, disposed):
-        assert http.submit(disposed, json={"note": "sent"}).status_code == 409
-
-    def test_note_longer_than_2000_is_400(self, http, uow, disposed):
+    @pytest.mark.parametrize(
+        "change",
+        [
+            {"note": "the Phase 4 body"},
+            {"report_type": "Interim"},
+            {"json_sha256": "not-hex"},
+            {"expected_next_report_date": "next week"},
+            {"authority_reference": "x" * 201},
+        ],
+    )
+    def test_malformed_bodies_are_400(self, http, uow, disposed, change):
         http.get(disposed)
-        resp = http.submit(disposed, json={"note": "x" * 2001})
-        assert resp.status_code == 400
-        assert uow.reports.get(disposed, 1).submitted_at is None
-        assert http.submit(disposed, json={"note": "x" * 2000}).status_code == 200
+        body = {**SUBMISSION, "report_id": str(uow.reports.get(disposed, 1).id), **change}
+        if "note" in change:
+            body = change
+        resp = http.submit(disposed, json=body)
+        assert resp.status_code == 400 and resp.json()["error_code"] == "MALFORMED_BODY"
+        assert uow.report_submissions.rows == []
+
+    def test_versions_and_by_id_over_http(self, http, uow, disposed):
+        current = http.get(disposed)
+        versions = http.client.get(f"/v1/events/{disposed}/reports").json()
+        assert [(v["report_version"], v["status"]) for v in versions] == [(1, "ASSEMBLED")]
+        by_id = http.client.get(f"/v1/reports/{versions[0]['report_id']}")
+        assert by_id.status_code == 200 and by_id.content == current.content
+        assert http.client.get(f"/v1/reports/{uuid4()}").status_code == 404
+        http.principal = user_principal(Role.VIEWER)
+        assert http.client.get(f"/v1/events/{disposed}/reports").status_code == 200
+        assert http.client.get(f"/v1/reports/{versions[0]['report_id']}").status_code == 403
+
+    def test_by_id_after_erasure_is_410(self, http, uow, clock, ledger, disposed):
+        http.get(disposed)
+        report_id = uow.reports.get(disposed, 1).id
+        clock.advance(days=400)
+        erase_expired(lambda: uow, ledger=ledger, clock=clock)
+        resp = http.client.get(f"/v1/reports/{report_id}")
+        assert resp.status_code == 410 and resp.json()["error_code"] == "RECORD_ERASED"
 
     def test_operations_are_published(self):
         paths = create_app().openapi()["paths"]
         get = paths["/v1/events/{event_id}/report"]["get"]
         post = paths["/v1/events/{event_id}/report/submission"]["post"]
         assert get["operationId"] == "getReport"
-        assert post["operationId"] == "markReportSubmitted"
+        assert post["operationId"] == "submitReport"
         assert {"200", "401", "403", "404", "409"} <= set(get["responses"])
-        assert {"200", "400", "401", "403", "404", "409"} <= set(post["responses"])
+        assert {"201", "400", "401", "403", "404", "409", "410"} <= set(post["responses"])
+        assert "get" in paths["/v1/events/{event_id}/reports"]
+        assert {"200", "403", "404", "410"} <= set(
+            paths["/v1/reports/{report_id}"]["get"]["responses"]
+        )
+
+    @pytest.mark.parametrize(
+        "path", ["/v1/events/{e}/reports", "/v1/reports/{e}", "/v1/events/{e}/report/submission"]
+    )
+    def test_new_routes_are_401_without_a_key(self, path):
+        url = path.format(e=uuid4())
+        client = TestClient(create_app())
+        resp = client.post(url, json=SUBMISSION) if "submission" in url else client.get(url)
+        assert resp.status_code == 401
+
+
+SUBMISSION = {"report_id": str(UUID(int=1)), "json_sha256": "0" * 64, "report_type": "Initial"}
 
 
 def re_sha(value: str) -> bool:

@@ -253,31 +253,98 @@ paths:
       - $ref: "#/components/parameters/EventId"
     post:
       tags: [reports]
-      operationId: markReportSubmitted
-      summary: Record that the reviewer submitted the report to the authority
+      operationId: submitReport
+      summary: Record that the reviewer submitted a report version to the authority
       description: |
-        **Proposed** (Phase 2 Section 6.3 "allow reviewers to mark a report as submitted").
-        Reviewer keys only. Submission itself happens outside the system.
+        **Proposed** (contract delta \u03943, D-29). Reviewer keys only. Records a manual
+        submission of the event's current report version; sends nothing. The event's first
+        submission is `INITIAL`, later ones `FOLLOW_UP`. 409 codes: `NOT_SUBMITTABLE` (no
+        serious-tier determination), `REPORT_NOT_CURRENT`, `REPORT_HASH_MISMATCH`,
+        `REPORT_ALREADY_SUBMITTED`; 410 `RECORD_ERASED`.
       x-phase: 5
       x-reqs: [REQ-12, REQ-13]
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
               type: object
+              required: [report_id, json_sha256, report_type]
               properties:
-                note: { type: string, maxLength: 2000 }
+                report_id: { $ref: "#/components/schemas/Id" }
+                json_sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
+                report_type:
+                  type: string
+                  enum: [Initial, Follow up, Combined initial and final, Final (Reportable incident)]
+                expected_next_report_date: { type: string, format: date }
+                authority_reference: { type: string, minLength: 1, maxLength: 200 }
+      responses:
+        "201":
+          description: The recorded submission
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [submission_id, report_id, event_id, submitted_by, submitted_at,
+                  submission_kind, report_type]
+                properties:
+                  submission_id: { $ref: "#/components/schemas/Id" }
+                  report_id: { $ref: "#/components/schemas/Id" }
+                  event_id: { $ref: "#/components/schemas/Id" }
+                  submitted_by: { $ref: "#/components/schemas/Id" }
+                  submitted_at: { type: string, format: date-time }
+                  submission_kind: { type: string, enum: [INITIAL, FOLLOW_UP] }
+                  report_type: { type: string }
+                  expected_next_report_date: { type: [string, "null"], format: date }
+                  authority_reference: { type: [string, "null"] }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "410": { $ref: "#/components/responses/Gone" }
+
+  /v1/events/{event_id}/reports:
+    parameters:
+      - $ref: "#/components/parameters/EventId"
+    get:
+      tags: [reports]
+      operationId: listReportVersions
+      summary: Every stored report version of the event (contract delta \u03944)
+      description: |
+        **Proposed** (D-29). Reviewer or viewer keys. A bare array, oldest first; `status` is
+        ASSEMBLED, SUBMITTED, SUPERSEDED or SUBMITTED_SUPERSEDED.
+      x-phase: 5
+      x-reqs: [REQ-12]
+      responses:
+        "200": { description: Report versions }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/reports/{report_id}:
+    parameters:
+      - name: report_id
+        in: path
+        required: true
+        schema: { $ref: "#/components/schemas/Id" }
+    get:
+      tags: [reports]
+      operationId: getReportVersion
+      summary: One stored report version, as assembled (contract delta \u03944)
+      description: "**Proposed** (D-29). Reviewer keys only; 410 RECORD_ERASED after erasure."
+      x-phase: 5
+      x-reqs: [REQ-12, REQ-13]
       responses:
         "200":
-          description: The report with `submitted_at` set
+          description: The report version
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Report" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
-        "409": { $ref: "#/components/responses/Conflict" }
+        "410": { $ref: "#/components/responses/Gone" }
 
   /v1/ledger/export:
     get:
@@ -460,6 +527,13 @@ components:
       description: Opaque event id. Ids that name no event, malformed ones included, are `404`.
 
   responses:
+    Gone:
+      description: |
+        `RECORD_ERASED` (contract delta \u03947): the event's personal data was erased, so its
+        reports are gone (REQ-16).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
     BadRequest:
       description: Malformed JSON, schema violation or invalid parameter (never 422 for these)
       content:

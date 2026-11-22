@@ -17,8 +17,8 @@ from app.modules.auth.interface import Role
 from app.modules.auth.service import create_user
 from app.modules.ledger.models import LedgerEntry
 from app.modules.ledger.service import verify_ledger
-from app.modules.records.service import note_purpose, report_purpose
-from app.modules.review.models import HarmFieldName, Report
+from app.modules.records.service import report_purpose
+from app.modules.review.models import HarmFieldName, Report, ReportSubmission
 from app.modules.review.report import get_report
 from tests.conftest import T0
 from tests.fakes import FixedClock, opened, user_principal
@@ -138,35 +138,61 @@ def test_model5_ex1_report_after_revision(stack, clock):
     assert verify_ledger(principal=user_principal(Role.VIEWER), uow=stack.make_uow()).valid
 
 
+def submission_body(stack, event_id, **extra):
+    """Contract delta \u03943: submit the event's current report version, by id and hash."""
+    (version,) = [
+        v
+        for v in stack.call("GET", f"/v1/events/{event_id}/reports", "viewer").json()
+        if v["status"] in ("ASSEMBLED", "SUBMITTED")
+    ]
+    return {
+        "report_id": version["report_id"],
+        "json_sha256": version["report_sha256"],
+        "report_type": "Initial",
+        **extra,
+    }
+
+
+DUMMY_SUBMISSION = {
+    "report_id": str(uuid.UUID(int=1)),
+    "json_sha256": "0" * 64,
+    "report_type": "Initial",
+}
+
+
 def test_submission(stack, clock):
     event_id = stack.breach()
     stack.dispose(event_id, {"tier": "OTHER_SERIOUS", "harm_fields": EX1_FIELDS})
-    assert stack.submit(event_id).status_code == 409  # not assembled yet
+    assert stack.call("GET", f"/v1/events/{event_id}/reports", "viewer").json() == []
     assembled = stack.report(event_id)
+    body = submission_body(stack, event_id, authority_reference="MSA-2026-0042")
     clock.advance(hours=2)
 
-    resp = stack.submit(event_id, json={"note": "sent via the authority's portal"})
-    assert resp.status_code == 200, resp.text
-    assert resp.json()["submitted_at"] == "2026-09-27T22:01:00Z"
-    # Only the submission fields differ from the assembled report.
-    before, after = assembled.json(), resp.json()
+    resp = stack.submit(event_id, json=body)
+    assert resp.status_code == 201, resp.text
+    out = resp.json()
+    assert (out["submitted_at"], out["submission_kind"]) == ("2026-09-27T22:01:00Z", "INITIAL")
+    assert out["authority_reference"] == "MSA-2026-0042"
+    # Only the submission time differs from the assembled report.
+    before, after = assembled.json(), stack.report(event_id).json()
     assert {k for k in after if after[k] != before[k]} == {"submitted_at"}
-    assert stack.report(event_id).content == resp.content
-    assert stack.submit(event_id).status_code == 409  # already marked
+    again = stack.submit(event_id, json=body)
+    assert again.status_code == 409 and again.json()["error_code"] == "REPORT_ALREADY_SUBMITTED"
+    by_id = stack.call("GET", f"/v1/reports/{body['report_id']}", "reviewer")
+    assert by_id.content == stack.report(event_id).content
+    versions = stack.call("GET", f"/v1/events/{event_id}/reports", "viewer").json()
+    assert [v["status"] for v in versions] == ["SUBMITTED"]
 
     with stack.sessionmaker() as s:
         stored = s.scalars(select(Report)).one()
         assert stored.submitted_by == stack.keys["reviewer"].user_id
+        submission = s.scalars(select(ReportSubmission)).one()
+        assert str(submission.id) == out["submission_id"] and submission.report_id == stored.id
         entry = s.scalars(
             select(LedgerEntry).where(LedgerEntry.entry_type == "REPORT_SUBMITTED")
         ).one()
-        # Sealed in the row and in the ledger, with the same token (REQ-16).
-        assert entry.payload["note"] == stored.submission_note
+        assert entry.payload["submission_id"] == out["submission_id"]
         assert entry.payload["report_sha256"] == stored.report_sha256
-        sealed_note = stored.submission_note
-    with stack.make_uow() as uow:
-        note = opened(uow, event_id, note_purpose(1), sealed_note)
-        assert note == "sent via the authority's portal"
     assert verify_ledger(principal=user_principal(Role.VIEWER), uow=stack.make_uow()).valid
 
 
@@ -178,7 +204,7 @@ def test_refusals_change_nothing_and_are_audited(stack):
     assert stack.report(event_id).status_code == 409
     for role in ("viewer", "admin", "system"):
         assert stack.report(event_id, role=role).status_code == 403
-        assert stack.submit(event_id, role=role).status_code == 403
+        assert stack.submit(event_id, role=role, json=DUMMY_SUBMISSION).status_code == 403
     assert stack.report(str(uuid.uuid4())).status_code == 404
     new = stack.audit(event_id)[len(before) :]
     assert [e["action"] for e in new] == ["REFUSED"] * 7

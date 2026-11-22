@@ -715,6 +715,27 @@ the tables a reset truncates; each reset adds one.
 **405 `Allow` header.** A path with separate GET and POST routes (`/v1/ledger/verifications`)
 now lists both in `Allow`, taken from the API's own OpenAPI document.
 
+**\u03943 and \u03944 (submissions and report versions), implemented.**
+- Each stored report version has a `report_id` (migration 0017; existing reports get one).
+- `GET /v1/events/{event_id}/reports` (reviewer or viewer; admin and system keys `403`): a
+  bare array, oldest first, of `{report_id, event_id, report_version, status, assembled_at,
+  report_sha256, submitted_at}`. `status`: `ASSEMBLED` / `SUBMITTED` for the version of the
+  current serious-tier disposition, `SUPERSEDED` / `SUBMITTED_SUPERSEDED` for the others.
+  `report_version` is the disposition number it was assembled from (our reading).
+- `GET /v1/reports/{report_id}` (reviewer only): that version, byte for byte as assembled,
+  with one `VIEW` entry; `404` unknown; `410 RECORD_ERASED` after erasure.
+- `POST /v1/events/{event_id}/report/submission` now takes the delta's body
+  `{report_id, json_sha256, report_type, expected_next_report_date?, authority_reference?}`
+  and returns `201` with the submission object. The Phase 4 `{note}` body is gone (`400`).
+  `json_sha256` must equal the version's `report_sha256`. The event's first submission is
+  `INITIAL`, later ones `FOLLOW_UP`. One submission per version.
+- Our reading of the error order: `403`; `404` (event, or a `report_id` that isn't one of the
+  event's versions); `410 RECORD_ERASED`; `409 NOT_SUBMITTABLE` (no serious-tier
+  determination now); `REPORT_NOT_CURRENT`; `REPORT_HASH_MISMATCH`; `REPORT_ALREADY_SUBMITTED`.
+- `authority_reference` is not treated as personal data (D-28), so it isn't sealed.
+- Not changed here (\u03942 is a Change row): `GET /v1/events/{event_id}/report` still answers
+  `409` after erasure and has no `format`/`X-Report-*` headers.
+
 **Open input "viewer writes", not implemented.** The delta notes that viewers may call
 `POST /v1/webhooks` and the test endpoints. Here they stay admin-only (D-13): Phase 2 §5.1 says
 viewers "can read events/audit/ledger but not write", and opening them would let a viewer send

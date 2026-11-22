@@ -36,6 +36,8 @@ from app.modules.review.repository import (
     SqlDispositionRepository,
     SqlHarmFieldRepository,
     SqlReportRepository,
+    SqlSubmissionRepository,
+    SubmissionRepository,
 )
 from app.modules.systems.repository import SqlSystemRepository, SystemRepository
 from app.modules.thresholds.repository import SqlThresholdRepository, ThresholdRepository
@@ -61,6 +63,8 @@ class UnitOfWork(Protocol):
     def reports(self) -> ReportRepository: ...
     @property
     def record_keys(self) -> RecordKeyRepository: ...
+    @property
+    def report_submissions(self) -> SubmissionRepository: ...
     @property
     def auth(self) -> AuthRepository: ...
     # Read side only; entries are written through the LedgerWriter.
@@ -100,6 +104,7 @@ class SqlAlchemyUnitOfWork:
         self.dispositions: DispositionRepository = SqlDispositionRepository(session)
         self.reports: ReportRepository = SqlReportRepository(session)
         self.record_keys: RecordKeyRepository = SqlRecordKeyRepository(session)
+        self.report_submissions: SubmissionRepository = SqlSubmissionRepository(session)
         self.auth: AuthRepository = SqlAuthRepository(session)
         self.ledger: LedgerRepository = SqlLedgerRepository(session)
         self.ledger_checks: LedgerCheckRepository = SqlLedgerCheckRepository(session)
