@@ -108,7 +108,7 @@ def test_meta_and_me(monkeypatch):
     client = TestClient(app)
     assert client.get("/v1/meta").json() == {
         "interface_version": INTERFACE_VERSION,
-        "phases": [3, 4],
+        "phases": [3, 4, 5],
         "test_routes": True,
         "build": "unknown",
     }

@@ -132,6 +132,17 @@ pytest tests/contract -m contract -v
 The Model 5 scenarios (`test_model5_ex*`) run the steps up to the phases in the target's
 `GET /v1/meta`; the later steps are listed as deferred in the report, not skipped.
 
+`tests/contract/test_phase5.py` holds the Phase 5 checks. It runs when the target lists phase 5
+and `CONTRACT_REVIEWER_KEY` is set; otherwise its tests are skipped with the reason. It covers:
+- the report against the shared `report.schema.json` (AC-13), its headers, byte stability and
+  PDF (Δ2), and no report before a disposition (AC-08);
+- roles (AC-14);
+- report versions, reading one by id, and submissions (Δ3, Δ4);
+- the risk indicator four simulated hours after detection (AC-17);
+- manual ledger verification runs (Δ5);
+- retention and erasure (AC-05, AC-18). This test moves the simulated clock six months, so it
+  runs last.
+
 The run writes `contract-report.md` and `contract-report.json`, and the results log below uses
 them. Each test declares the REQs, ACs, endpoints (**component coverage**), and Model 1 states and
 Model 4 invariants (**system-model coverage**) it exercises. The report lists what was covered,

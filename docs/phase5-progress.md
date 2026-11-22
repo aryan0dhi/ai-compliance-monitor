@@ -16,7 +16,7 @@ No secrets go in this file.
 | REQ-16 personal-data erasure | Nothing | none (#70 unassigned) | — |
 | REQ-05 retention enforcement | `retain_until` + CHECK only | none (#69 unassigned) | — |
 | REQ-05 evidence-bundle hash | Column only, never set | none (#68 unassigned; D-05 open) | — |
-| Phase 5 listed in `/v1/meta` | — | #72 (tracking) | — |
+| Phase 5 listed in `/v1/meta` | Listed (`phases: [3, 4, 5]`), with Phase 5 contract tests (`tests/contract/test_phase5.py`) | #72 | — |
 | Deployment | GCP VM runs pre-Phase-4 code (`/v1/meta` phases `[3]`, no review routes) | — | — |
 
 Migration line: `0009` on main → `0010` (#73) → `0011` (#74) → `0012` (#75) → `0013` (#76). All on
@@ -34,8 +34,9 @@ Migration line: `0009` on main → `0010` (#73) → `0011` (#74) → `0012` (#75
 
 - **#68 evidence-bundle hash:** D-05 (which window, when hashed) is an open pod decision; building
   it now would mean inventing the rule.
-- **#72 phase 5 in `/v1/meta`:** last, after #73, #74, #75, #76 and a D-05 answer; listing phase 5
-  makes podmates' harnesses run Phase 5 steps against us.
+- **#72 phase 5 in `/v1/meta`:** done. Podmates' harnesses now run our Phase 5 steps (Ex-1's
+  report, Ex-2's no-report). The event's own evidence hash (D-05) is still open; reports carry
+  their own `evidence_sha256` (D-30).
 - **Chain head outside the database (REQ-06, §6.3):** follow-up to #74 (owner EthanBar25), noted as
   a limit in D-27.
 - **REQ-15 explicit elapsed-time field, REQ-10 configurable calendar:** both change the shared

@@ -9,9 +9,10 @@ from pydantic import BaseModel, Field
 # docs/pod-interface/openapi.yaml info.version.
 INTERFACE_VERSION = "1.0.0-draft"
 # Phases whose pod-interface operations this service provides. Phase 4 (review, disposition,
-# deadlines, reminders) since #67; the Phase 5 report endpoints exist, but retention, evidence
-# hashing, crypto-shredding and the nightly alert don't yet (#72).
-IMPLEMENTED_PHASES = [3, 4]
+# deadlines, reminders) since #67. Phase 5 since #72: the Δ1 report and its PDF (D-30), report
+# versions and submissions (Δ3, Δ4), erasure and the end-of-retention job (REQ-16, Δ6), and the
+# scheduled ledger check (Δ5). The event's own evidence hash stays open (D-05).
+IMPLEMENTED_PHASES = [3, 4, 5]
 
 
 class MetaOut(BaseModel):
